@@ -1,0 +1,89 @@
+:root {
+  /* Sakura color palette */
+  --sakura-50: #fef7f8;
+  --sakura-100: #fdeef0;
+  --sakura-200: #fbd5dc;
+  --sakura-300: #f8b4c0;
+  --sakura-400: #f48da0;
+  --sakura-500: #e85d7a;
+  --sakura-600: #d43d5e;
+  --sakura-700: #b22d4a;
+  --sakura-800: #952840;
+  --sakura-900: #7f263b;
+
+  --green-50: #f0f9f0;
+  --green-100: #d8f0d8;
+  --green-200: #a8d8a8;
+  --green-300: #6bbf6b;
+  --green-400: #4a9f4a;
+  --green-500: #3a7a3a;
+
+  --sky-100: #e8f4fd;
+  --sky-200: #b8dcf8;
+  --sky-300: #7fc4f0;
+
+  --wood-100: #f5e6d3;
+  --wood-200: #d4a574;
+  --wood-300: #8b6914;
+
+  --bg-overlay: rgba(255, 255, 255, 0.85);
+  --bg-overlay-dark: rgba(0, 0, 0, 0.5);
+  --text-primary: #3a2a2a;
+  --text-secondary: #6b5a5a;
+  --text-light: #ffffff;
+  --shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.15);
+
+  font-family: 'Noto Sans JP', 'Zen Maru Gothic', sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: #1a1a2e;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  outline: none;
+}
+
+input, textarea {
+  font-family: inherit;
+  outline: none;
+  -webkit-user-select: text;
+  user-select: text;
+  touch-action: auto;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--sakura-300);
+  border-radius: 2px;
+}
