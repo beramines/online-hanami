@@ -4,8 +4,6 @@ import { useChatStore } from '../stores/chatStore'
 import { useGameStore } from '../stores/gameStore'
 import type { ChatMessage, Player } from '../types'
 
-const CHANNEL_NAME = 'hanami-room'
-
 export function useRealtimeChat() {
   const addMessage = useChatStore((s) => s.addMessage)
   const updatePlayer = useGameStore((s) => s.updatePlayer)
@@ -13,13 +11,14 @@ export function useRealtimeChat() {
   const playerId = useGameStore((s) => s.playerId)
   const playerName = useGameStore((s) => s.playerName)
   const avatar = useGameStore((s) => s.avatar)
+  const roomId = useGameStore((s) => s.roomId)
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
   const lastBroadcast = useRef(0)
 
   useEffect(() => {
-    if (!playerId || !isSupabaseConfigured) return
+    if (!playerId || !roomId || !isSupabaseConfigured) return
 
-    const channel = supabase.channel(CHANNEL_NAME, {
+    const channel = supabase.channel(`hanami-room:${roomId}`, {
       config: {
         presence: { key: playerId },
         broadcast: { self: false },
@@ -50,9 +49,11 @@ export function useRealtimeChat() {
     // Presence sync — get all currently present players
     channel.on('presence', { event: 'sync' }, () => {
       const state = channel.presenceState()
+      const presentIds = new Set<string>()
       for (const [, presences] of Object.entries(state)) {
         for (const presence of presences as unknown as (Player & { presence_ref: string })[]) {
           if (presence.id && presence.id !== playerId && presence.avatar) {
+            presentIds.add(presence.id)
             updatePlayer(presence.id, {
               id: presence.id,
               name: presence.name,
@@ -62,6 +63,13 @@ export function useRealtimeChat() {
               isSpeaking: false,
             })
           }
+        }
+      }
+      // Presenceに存在しないプレイヤーを削除
+      const currentPlayers = useGameStore.getState().players
+      for (const id of Object.keys(currentPlayers)) {
+        if (id !== playerId && !presentIds.has(id)) {
+          removePlayer(id)
         }
       }
     })
@@ -115,6 +123,14 @@ export function useRealtimeChat() {
       }
     })
 
+    const cleanup = () => {
+      channel.untrack()
+      channel.unsubscribe()
+      useGameStore.getState().setBroadcastPosition(null)
+    }
+    window.addEventListener('beforeunload', cleanup)
+    window.addEventListener('pagehide', cleanup)
+
     channelRef.current = channel
 
     // Listen for voice signal sends from useVoiceChat
@@ -128,11 +144,12 @@ export function useRealtimeChat() {
     window.addEventListener('send-voice-signal', handleSendVoiceSignal)
 
     return () => {
+      window.removeEventListener('beforeunload', cleanup)
+      window.removeEventListener('pagehide', cleanup)
       window.removeEventListener('send-voice-signal', handleSendVoiceSignal)
-      channel.unsubscribe()
-      useGameStore.getState().setBroadcastPosition(null as never)
+      cleanup()
     }
-  }, [playerId, playerName, avatar, addMessage, updatePlayer, removePlayer])
+  }, [playerId, playerName, avatar, roomId, addMessage, updatePlayer, removePlayer])
 
   const sendMessage = useCallback(
     (message: ChatMessage) => {

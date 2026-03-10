@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useGameStore } from '../../stores/gameStore'
+import type { RoomSummary } from '../../hooks/useRoomList'
 import type { AvatarType } from '../../types'
 
 const AVATARS: { type: AvatarType; emoji: string; label: string }[] = [
@@ -10,19 +11,32 @@ const AVATARS: { type: AvatarType; emoji: string; label: string }[] = [
   { type: 'seal', emoji: '🦭', label: 'アザラシ' },
 ]
 
+const MAX_PLAYERS = 8
+
 interface LobbyProps {
   onJoin: () => void
+  rooms: RoomSummary[]
+  isLoading: boolean
+  createRoom: (roomName: string) => Promise<string>
+  joinRoom: (roomId: string, roomName: string) => Promise<void>
 }
 
-export function Lobby({ onJoin }: LobbyProps) {
+type LobbyStep = 'profile' | 'room-select'
+
+export function Lobby({ onJoin, rooms, isLoading, createRoom, joinRoom }: LobbyProps) {
+  const [step, setStep] = useState<LobbyStep>('profile')
   const [name, setName] = useState('')
   const [selectedAvatar, setSelectedAvatar] = useState<AvatarType>('male')
+  const [newRoomName, setNewRoomName] = useState('')
+  const [showCreateRoom, setShowCreateRoom] = useState(false)
+  const [error, setError] = useState('')
+  const [joining, setJoining] = useState(false)
   const setPlayerName = useGameStore((s) => s.setPlayerName)
   const setAvatar = useGameStore((s) => s.setAvatar)
   const setPlayerId = useGameStore((s) => s.setPlayerId)
   const updatePlayer = useGameStore((s) => s.updatePlayer)
 
-  const handleJoin = () => {
+  const handleNext = () => {
     if (!name.trim()) return
     const id = crypto.randomUUID()
     const trimmedName = name.trim()
@@ -37,7 +51,34 @@ export function Lobby({ onJoin }: LobbyProps) {
       rotation: 0,
       isSpeaking: false,
     })
-    onJoin()
+    setStep('room-select')
+  }
+
+  const handleCreateRoom = async () => {
+    if (joining) return
+    setJoining(true)
+    setError('')
+    try {
+      const roomName = newRoomName.trim() || `${name}のお花見`
+      await createRoom(roomName)
+      onJoin()
+    } catch {
+      setError('ルームの作成に失敗しました。もう一度お試しください。')
+      setJoining(false)
+    }
+  }
+
+  const handleJoinRoom = async (roomId: string, roomName: string) => {
+    if (joining) return
+    setJoining(true)
+    setError('')
+    try {
+      await joinRoom(roomId, roomName)
+      onJoin()
+    } catch {
+      setError('ルームへの参加に失敗しました。もう一度お試しください。')
+      setJoining(false)
+    }
   }
 
   return (
@@ -63,64 +104,155 @@ export function Lobby({ onJoin }: LobbyProps) {
         <h1 style={styles.title}>🌸 オンラインお花見 🌸</h1>
         <p style={styles.subtitle}>みんなで桜を楽しもう</p>
 
-        <div style={styles.inputGroup}>
-          <label style={styles.label}>名前</label>
-          <input
-            style={styles.input}
-            type="text"
-            placeholder="あなたの名前を入力..."
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            maxLength={12}
-            onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
-          />
-        </div>
+        {step === 'profile' && (
+          <>
+            <div style={styles.inputGroup}>
+              <label style={styles.label}>名前</label>
+              <input
+                style={styles.input}
+                type="text"
+                placeholder="あなたの名前を入力..."
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={12}
+                onKeyDown={(e) => e.key === 'Enter' && handleNext()}
+              />
+            </div>
 
-        <div style={styles.inputGroup}>
-          <label style={styles.label}>アバターを選択</label>
-          <div style={styles.avatarGrid}>
-            {AVATARS.map((av) => (
+            <div style={styles.inputGroup}>
+              <label style={styles.label}>アバターを選択</label>
+              <div style={styles.avatarGrid}>
+                {AVATARS.map((av) => (
+                  <button
+                    key={av.type}
+                    onClick={() => setSelectedAvatar(av.type)}
+                    style={{
+                      ...styles.avatarBtn,
+                      ...(selectedAvatar === av.type ? styles.avatarBtnActive : {}),
+                    }}
+                  >
+                    <span style={styles.avatarEmoji}>{av.emoji}</span>
+                    <span style={styles.avatarLabel}>{av.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button
+              style={{
+                ...styles.joinBtn,
+                ...(name.trim() ? {} : styles.joinBtnDisabled),
+              }}
+              onClick={handleNext}
+              disabled={!name.trim()}
+            >
+              次へ
+            </button>
+
+            <div style={styles.controls}>
+              <p style={styles.controlsTitle}>操作方法</p>
+              {'ontouchstart' in globalThis ? (
+                <>
+                  <p style={styles.controlText}>左スティック: 移動</p>
+                  <p style={styles.controlText}>右スティック: 回転</p>
+                </>
+              ) : (
+                <>
+                  <p style={styles.controlText}>W/↑ 前進　S/↓ 後退</p>
+                  <p style={styles.controlText}>A 左移動　D 右移動　←→ 回転</p>
+                  <p style={styles.controlText}>Enter チャット送信</p>
+                </>
+              )}
+            </div>
+          </>
+        )}
+
+        {step === 'room-select' && (
+          <>
+            <button
+              style={styles.backBtn}
+              onClick={() => setStep('profile')}
+            >
+              ← 戻る
+            </button>
+
+            {error && <p style={styles.errorText}>{error}</p>}
+
+            <div style={styles.inputGroup}>
+              <label style={styles.label}>ルームを選択</label>
+
+              {isLoading ? (
+                <p style={styles.loadingText}>ルームを読み込み中...</p>
+              ) : rooms.length === 0 ? (
+                <p style={styles.emptyText}>現在ルームがありません。新しく作成しましょう！</p>
+              ) : (
+                <div style={styles.roomList}>
+                  {rooms.map((room) => (
+                    <button
+                      key={room.roomId}
+                      style={{
+                        ...styles.roomItem,
+                        ...(room.playerCount >= MAX_PLAYERS ? styles.roomItemFull : {}),
+                      }}
+                      onClick={() => handleJoinRoom(room.roomId, room.roomName)}
+                      disabled={room.playerCount >= MAX_PLAYERS || joining}
+                    >
+                      <div style={styles.roomInfo}>
+                        <span style={styles.roomName}>{room.roomName}</span>
+                        <span style={styles.roomCount}>
+                          {room.playerCount}/{MAX_PLAYERS}人
+                        </span>
+                      </div>
+                      <span style={styles.roomJoinLabel}>
+                        {room.playerCount >= MAX_PLAYERS ? '満員' : '参加'}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {!showCreateRoom ? (
               <button
-                key={av.type}
-                onClick={() => setSelectedAvatar(av.type)}
-                style={{
-                  ...styles.avatarBtn,
-                  ...(selectedAvatar === av.type ? styles.avatarBtnActive : {}),
-                }}
+                style={styles.createRoomBtn}
+                onClick={() => setShowCreateRoom(true)}
               >
-                <span style={styles.avatarEmoji}>{av.emoji}</span>
-                <span style={styles.avatarLabel}>{av.label}</span>
+                + 新しいルームを作成
               </button>
-            ))}
-          </div>
-        </div>
-
-        <button
-          style={{
-            ...styles.joinBtn,
-            ...(name.trim() ? {} : styles.joinBtnDisabled),
-          }}
-          onClick={handleJoin}
-          disabled={!name.trim()}
-        >
-          お花見に参加する
-        </button>
-
-        <div style={styles.controls}>
-          <p style={styles.controlsTitle}>操作方法</p>
-          {'ontouchstart' in globalThis ? (
-            <>
-              <p style={styles.controlText}>左スティック: 移動</p>
-              <p style={styles.controlText}>右スティック: 回転</p>
-            </>
-          ) : (
-            <>
-              <p style={styles.controlText}>W/↑ 前進　S/↓ 後退</p>
-              <p style={styles.controlText}>A 左移動　D 右移動　←→ 回転</p>
-              <p style={styles.controlText}>Enter チャット送信</p>
-            </>
-          )}
-        </div>
+            ) : (
+              <div style={styles.createRoomForm}>
+                <input
+                  style={styles.input}
+                  type="text"
+                  placeholder={`${name}のお花見`}
+                  value={newRoomName}
+                  onChange={(e) => setNewRoomName(e.target.value)}
+                  maxLength={20}
+                  onKeyDown={(e) => e.key === 'Enter' && handleCreateRoom()}
+                  autoFocus
+                />
+                <div style={styles.createRoomActions}>
+                  <button
+                    style={styles.cancelBtn}
+                    onClick={() => setShowCreateRoom(false)}
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    style={{
+                      ...styles.joinBtn,
+                      ...(joining ? styles.joinBtnDisabled : {}),
+                    }}
+                    onClick={handleCreateRoom}
+                    disabled={joining}
+                  >
+                    {joining ? '参加中...' : 'ルームを作成'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       <style>{`
@@ -152,6 +284,8 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '40px',
     maxWidth: '480px',
     width: '90%',
+    maxHeight: '90vh',
+    overflowY: 'auto',
     boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
     position: 'relative',
     zIndex: 1,
@@ -269,5 +403,106 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '12px',
     color: '#6b5a5a',
     lineHeight: 1.6,
+  },
+  backBtn: {
+    background: 'none',
+    border: 'none',
+    color: '#b22d4a',
+    fontSize: '14px',
+    cursor: 'pointer',
+    padding: '4px 0',
+    marginBottom: '16px',
+    fontWeight: 500,
+  },
+  roomList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  roomItem: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '14px 16px',
+    borderRadius: '12px',
+    border: '2px solid #fbd5dc',
+    background: '#fef7f8',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    width: '100%',
+    textAlign: 'left',
+  },
+  roomItemFull: {
+    opacity: 0.5,
+    cursor: 'not-allowed',
+  },
+  roomInfo: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+  },
+  roomName: {
+    fontSize: '15px',
+    fontWeight: 600,
+    color: '#3a2a2a',
+  },
+  roomCount: {
+    fontSize: '12px',
+    color: '#6b5a5a',
+  },
+  roomJoinLabel: {
+    fontSize: '13px',
+    fontWeight: 600,
+    color: '#e85d7a',
+  },
+  loadingText: {
+    textAlign: 'center',
+    color: '#6b5a5a',
+    fontSize: '14px',
+    padding: '20px',
+  },
+  emptyText: {
+    textAlign: 'center',
+    color: '#6b5a5a',
+    fontSize: '14px',
+    padding: '20px',
+  },
+  createRoomBtn: {
+    width: '100%',
+    padding: '14px',
+    borderRadius: '12px',
+    background: '#fef7f8',
+    color: '#b22d4a',
+    fontSize: '15px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    border: '2px dashed #fbd5dc',
+    transition: 'all 0.2s',
+  },
+  createRoomForm: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  createRoomActions: {
+    display: 'flex',
+    gap: '8px',
+  },
+  errorText: {
+    textAlign: 'center',
+    color: '#d43d5e',
+    fontSize: '13px',
+    marginBottom: '12px',
+  },
+  cancelBtn: {
+    flex: 1,
+    padding: '12px',
+    borderRadius: '12px',
+    background: '#f5f0f0',
+    color: '#6b5a5a',
+    fontSize: '14px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    border: 'none',
   },
 }

@@ -23,6 +23,14 @@ export interface RoomState {
   maxPlayers: number
 }
 
+export interface RoomInfo {
+  roomId: string
+  roomName: string
+  playerId: string
+  playerName: string
+  avatar: AvatarType
+}
+
 export interface VoicePeer {
   playerId: string
   stream: MediaStream | null

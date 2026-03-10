@@ -9,6 +9,7 @@ interface GameState {
   avatar: AvatarType
   players: Record<string, Player>
   roomId: string | null
+  roomName: string
   isConnected: boolean
   broadcastPosition: BroadcastPositionFn | null
 
@@ -16,11 +17,13 @@ interface GameState {
   setPlayerName: (name: string) => void
   setAvatar: (avatar: AvatarType) => void
   setRoomId: (roomId: string) => void
+  setRoomName: (roomName: string) => void
   setConnected: (connected: boolean) => void
   updatePlayer: (id: string, player: Partial<Player>) => void
   removePlayer: (id: string) => void
   setPlayers: (players: Record<string, Player>) => void
-  setBroadcastPosition: (fn: BroadcastPositionFn) => void
+  setBroadcastPosition: (fn: BroadcastPositionFn | null) => void
+  clearRoom: () => void
 }
 
 export const useGameStore = create<GameState>((set) => ({
@@ -29,6 +32,7 @@ export const useGameStore = create<GameState>((set) => ({
   avatar: 'male',
   players: {},
   roomId: null,
+  roomName: '',
   isConnected: false,
   broadcastPosition: null,
 
@@ -36,6 +40,7 @@ export const useGameStore = create<GameState>((set) => ({
   setPlayerName: (name) => set({ playerName: name }),
   setAvatar: (avatar) => set({ avatar }),
   setRoomId: (roomId) => set({ roomId }),
+  setRoomName: (roomName) => set({ roomName }),
   setConnected: (connected) => set({ isConnected: connected }),
   updatePlayer: (id, player) =>
     set((state) => ({
@@ -51,4 +56,5 @@ export const useGameStore = create<GameState>((set) => ({
     }),
   setPlayers: (players) => set({ players }),
   setBroadcastPosition: (fn) => set({ broadcastPosition: fn }),
+  clearRoom: () => set({ roomId: null, roomName: '', players: {}, isConnected: false, broadcastPosition: null }),
 }))

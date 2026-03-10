@@ -6,7 +6,11 @@ import { PlayerList } from './PlayerList'
 import { MobileControls } from './VirtualJoystick'
 import { useInputStore } from '../../stores/inputStore'
 
-export function HUD() {
+interface HUDProps {
+  onLeave?: () => void
+}
+
+export function HUD({ onLeave }: HUDProps) {
   const setMove = useInputStore((s) => s.setMove)
   const setLook = useInputStore((s) => s.setLook)
 
@@ -25,6 +29,11 @@ export function HUD() {
         <div style={styles.topRight}>
           <CameraToggle />
           <VoiceControls />
+          {onLeave && (
+            <button style={styles.leaveBtn} onClick={onLeave}>
+              退出
+            </button>
+          )}
         </div>
       </div>
       <div style={styles.sidebar}>
@@ -71,6 +80,17 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'rgba(232,93,122,0.8)',
     padding: '6px 14px',
     borderRadius: '20px',
+    backdropFilter: 'blur(10px)',
+  },
+  leaveBtn: {
+    padding: '6px 14px',
+    borderRadius: '20px',
+    background: 'rgba(0,0,0,0.4)',
+    color: '#fff',
+    fontSize: '13px',
+    fontWeight: 600,
+    border: 'none',
+    cursor: 'pointer',
     backdropFilter: 'blur(10px)',
   },
   sidebar: {

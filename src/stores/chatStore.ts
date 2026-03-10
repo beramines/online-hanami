@@ -15,9 +15,10 @@ export const useChatStore = create<ChatState>((set) => ({
   isOpen: !('ontouchstart' in globalThis),
 
   addMessage: (message) =>
-    set((state) => ({
-      messages: [...state.messages.slice(-99), message],
-    })),
+    set((state) => {
+      if (state.messages.some((m) => m.id === message.id)) return state
+      return { messages: [...state.messages.slice(-99), message] }
+    }),
   setOpen: (open) => set({ isOpen: open }),
   toggleOpen: () => set((state) => ({ isOpen: !state.isOpen })),
 }))
