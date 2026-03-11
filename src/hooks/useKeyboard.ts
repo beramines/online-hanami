@@ -8,13 +8,15 @@ interface KeyState {
   right: boolean
   strafeLeft: boolean
   strafeRight: boolean
+  lookUp: boolean
+  lookDown: boolean
 }
 
 const KEY_MAP: Record<string, keyof KeyState> = {
   KeyW: 'forward',
-  ArrowUp: 'forward',
   KeyS: 'backward',
-  ArrowDown: 'backward',
+  ArrowUp: 'lookUp',
+  ArrowDown: 'lookDown',
   ArrowLeft: 'left',
   ArrowRight: 'right',
   KeyA: 'strafeLeft',
@@ -29,6 +31,8 @@ export function useKeyboard(): KeyState {
     right: false,
     strafeLeft: false,
     strafeRight: false,
+    lookUp: false,
+    lookDown: false,
   })
 
   useEffect(() => {

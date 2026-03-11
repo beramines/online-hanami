@@ -158,9 +158,9 @@ export function Lobby({ onJoin, rooms, isLoading, createRoom, joinRoom }: LobbyP
                 </>
               ) : (
                 <>
-                  <p style={styles.controlText}>W/↑ 前進　S/↓ 後退</p>
-                  <p style={styles.controlText}>A 左移動　D 右移動　←→ 回転</p>
-                  <p style={styles.controlText}>Enter チャット送信</p>
+                  <p style={styles.controlText}>W 前進　S 後退　A 左移動　D 右移動</p>
+                  <p style={styles.controlText}>←→ 回転　↑↓ 視点上下</p>
+                  <p style={styles.controlText}>V 視点切替　Enter チャット送信</p>
                 </>
               )}
             </div>
