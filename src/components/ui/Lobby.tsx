@@ -19,11 +19,12 @@ interface LobbyProps {
   isLoading: boolean
   createRoom: (roomName: string) => Promise<string>
   joinRoom: (roomId: string, roomName: string) => Promise<void>
+  inviteRoomId: string | null
 }
 
 type LobbyStep = 'profile' | 'room-select'
 
-export function Lobby({ onJoin, rooms, isLoading, createRoom, joinRoom }: LobbyProps) {
+export function Lobby({ onJoin, rooms, isLoading, createRoom, joinRoom, inviteRoomId }: LobbyProps) {
   const [step, setStep] = useState<LobbyStep>('profile')
   const [name, setName] = useState('')
   const [selectedAvatar, setSelectedAvatar] = useState<AvatarType>('male')
@@ -36,7 +37,7 @@ export function Lobby({ onJoin, rooms, isLoading, createRoom, joinRoom }: LobbyP
   const setPlayerId = useGameStore((s) => s.setPlayerId)
   const updatePlayer = useGameStore((s) => s.updatePlayer)
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (!name.trim()) return
     const id = crypto.randomUUID()
     const trimmedName = name.trim()
@@ -51,6 +52,24 @@ export function Lobby({ onJoin, rooms, isLoading, createRoom, joinRoom }: LobbyP
       rotation: 0,
       isSpeaking: false,
     })
+
+    // If invited via URL, auto-join that room
+    if (inviteRoomId) {
+      setJoining(true)
+      setError('')
+      try {
+        // Find room name from room list, or use a default
+        const existingRoom = rooms.find((r) => r.roomId === inviteRoomId)
+        const roomName = existingRoom?.roomName || 'お花見ルーム'
+        await joinRoom(inviteRoomId, roomName)
+        onJoin()
+        return
+      } catch {
+        setError('招待リンクのルームに参加できませんでした。ルームを選択してください。')
+        setJoining(false)
+      }
+    }
+
     setStep('room-select')
   }
 
@@ -84,28 +103,17 @@ export function Lobby({ onJoin, rooms, isLoading, createRoom, joinRoom }: LobbyP
   return (
     <div style={styles.overlay}>
       <div style={styles.container}>
-        {/* Floating petals background */}
-        <div style={styles.petalsBg}>
-          {Array.from({ length: 20 }).map((_, i) => (
-            <span
-              key={i}
-              style={{
-                ...styles.petal,
-                left: `${Math.random() * 100}%`,
-                animationDelay: `${Math.random() * 5}s`,
-                animationDuration: `${3 + Math.random() * 4}s`,
-              }}
-            >
-              🌸
-            </span>
-          ))}
-        </div>
-
         <h1 style={styles.title}>🌸 オンラインお花見 🌸</h1>
         <p style={styles.subtitle}>みんなで桜を楽しもう</p>
 
         {step === 'profile' && (
           <>
+            {inviteRoomId && (
+              <div style={styles.inviteBanner}>
+                招待リンクからのアクセスです。名前を入力して参加しましょう！
+              </div>
+            )}
+
             <div style={styles.inputGroup}>
               <label style={styles.label}>名前</label>
               <input
@@ -115,7 +123,7 @@ export function Lobby({ onJoin, rooms, isLoading, createRoom, joinRoom }: LobbyP
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 maxLength={12}
-                onKeyDown={(e) => e.key === 'Enter' && handleNext()}
+                onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && handleNext()}
               />
             </div>
 
@@ -141,13 +149,15 @@ export function Lobby({ onJoin, rooms, isLoading, createRoom, joinRoom }: LobbyP
             <button
               style={{
                 ...styles.joinBtn,
-                ...(name.trim() ? {} : styles.joinBtnDisabled),
+                ...(!name.trim() || joining ? styles.joinBtnDisabled : {}),
               }}
               onClick={handleNext}
-              disabled={!name.trim()}
+              disabled={!name.trim() || joining}
             >
-              次へ
+              {joining ? '参加中...' : inviteRoomId ? 'ルームに参加' : '次へ'}
             </button>
+
+            {error && <p style={styles.errorText}>{error}</p>}
 
             <div style={styles.controls}>
               <p style={styles.controlsTitle}>操作方法</p>
@@ -228,7 +238,7 @@ export function Lobby({ onJoin, rooms, isLoading, createRoom, joinRoom }: LobbyP
                   value={newRoomName}
                   onChange={(e) => setNewRoomName(e.target.value)}
                   maxLength={20}
-                  onKeyDown={(e) => e.key === 'Enter' && handleCreateRoom()}
+                  onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && handleCreateRoom()}
                   autoFocus
                 />
                 <div style={styles.createRoomActions}>
@@ -255,14 +265,6 @@ export function Lobby({ onJoin, rooms, isLoading, createRoom, joinRoom }: LobbyP
         )}
       </div>
 
-      <style>{`
-        @keyframes petalFall {
-          0% { transform: translateY(-20px) rotate(0deg); opacity: 0; }
-          10% { opacity: 1; }
-          90% { opacity: 1; }
-          100% { transform: translateY(100vh) rotate(360deg); opacity: 0; }
-        }
-      `}</style>
     </div>
   )
 }
@@ -291,20 +293,7 @@ const styles: Record<string, React.CSSProperties> = {
     zIndex: 1,
     backdropFilter: 'blur(10px)',
   },
-  petalsBg: {
-    position: 'fixed',
-    inset: 0,
-    pointerEvents: 'none',
-    zIndex: 0,
-  },
-  petal: {
-    position: 'absolute',
-    top: '-20px',
-    fontSize: '20px',
-    animation: 'petalFall linear infinite',
-    pointerEvents: 'none',
-  },
-  title: {
+title: {
     fontFamily: "'Zen Maru Gothic', sans-serif",
     fontSize: '28px',
     fontWeight: 700,
@@ -493,6 +482,17 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#d43d5e',
     fontSize: '13px',
     marginBottom: '12px',
+  },
+  inviteBanner: {
+    background: 'linear-gradient(135deg, #fff0f3, #ffe0e6)',
+    border: '2px solid #e85d7a',
+    borderRadius: '12px',
+    padding: '12px 16px',
+    marginBottom: '16px',
+    fontSize: '14px',
+    fontWeight: 500,
+    color: '#b22d4a',
+    textAlign: 'center',
   },
   cancelBtn: {
     flex: 1,

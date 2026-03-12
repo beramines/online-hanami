@@ -1,10 +1,11 @@
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import { ChatPanel } from './ChatPanel'
 import { VoiceControls } from './VoiceControls'
 import { CameraToggle } from './CameraToggle'
 import { PlayerList } from './PlayerList'
 import { MobileControls } from './VirtualJoystick'
 import { useInputStore } from '../../stores/inputStore'
+import { useGameStore } from '../../stores/gameStore'
 
 interface HUDProps {
   onLeave?: () => void
@@ -13,6 +14,8 @@ interface HUDProps {
 export function HUD({ onLeave }: HUDProps) {
   const setMove = useInputStore((s) => s.setMove)
   const setLook = useInputStore((s) => s.setLook)
+  const roomId = useGameStore((s) => s.roomId)
+  const [copied, setCopied] = useState(false)
 
   const handleMoveJoystick = useCallback((x: number, y: number) => {
     setMove(x, y)
@@ -22,11 +25,26 @@ export function HUD({ onLeave }: HUDProps) {
     setLook(x, y)
   }, [setLook])
 
+  const handleShare = useCallback(() => {
+    if (!roomId) return
+    const url = new URL(window.location.href)
+    url.searchParams.set('room', roomId)
+    // Remove hash if any
+    url.hash = ''
+    navigator.clipboard.writeText(url.toString()).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }, [roomId])
+
   return (
     <div style={styles.hud}>
       <div style={styles.topBar}>
         <div style={styles.logo}>🌸 お花見</div>
         <div style={styles.topRight}>
+          <button style={styles.shareBtn} onClick={handleShare}>
+            {copied ? 'コピー済み!' : '招待URL'}
+          </button>
           <CameraToggle />
           <VoiceControls />
           {onLeave && (
@@ -80,6 +98,17 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'rgba(232,93,122,0.8)',
     padding: '6px 14px',
     borderRadius: '20px',
+    backdropFilter: 'blur(10px)',
+  },
+  shareBtn: {
+    padding: '6px 14px',
+    borderRadius: '20px',
+    background: 'rgba(232,93,122,0.8)',
+    color: '#fff',
+    fontSize: '13px',
+    fontWeight: 600,
+    border: 'none',
+    cursor: 'pointer',
     backdropFilter: 'blur(10px)',
   },
   leaveBtn: {
