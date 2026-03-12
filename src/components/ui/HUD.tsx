@@ -25,16 +25,27 @@ export function HUD({ onLeave }: HUDProps) {
     setLook(x, y)
   }, [setLook])
 
-  const handleShare = useCallback(() => {
+  const handleShare = useCallback(async () => {
     if (!roomId) return
     const url = new URL(window.location.href)
     url.searchParams.set('room', roomId)
-    // Remove hash if any
     url.hash = ''
-    navigator.clipboard.writeText(url.toString()).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
+    const text = url.toString()
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      // Fallback: use deprecated execCommand for environments where clipboard API is blocked
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
   }, [roomId])
 
   return (
@@ -42,7 +53,7 @@ export function HUD({ onLeave }: HUDProps) {
       <div style={styles.topBar}>
         <div style={styles.logo}>🌸 お花見</div>
         <div style={styles.topRight}>
-          <button style={styles.shareBtn} onClick={handleShare}>
+          <button style={copied ? { ...styles.shareBtn, ...styles.shareBtnCopied } : styles.shareBtn} onClick={handleShare}>
             {copied ? 'コピー済み!' : '招待URL'}
           </button>
           <CameraToggle />
@@ -110,6 +121,10 @@ const styles: Record<string, React.CSSProperties> = {
     border: 'none',
     cursor: 'pointer',
     backdropFilter: 'blur(10px)',
+    transition: 'background 0.2s',
+  },
+  shareBtnCopied: {
+    background: 'rgba(34,197,94,0.9)',
   },
   leaveBtn: {
     padding: '6px 14px',
