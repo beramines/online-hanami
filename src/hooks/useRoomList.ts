@@ -114,8 +114,19 @@ export function useRoomList() {
   const joinRoom = useCallback(
     async (roomId: string, roomName: string) => {
       const state = useGameStore.getState()
-      const ch = channelRef.current || lobbyChannel
-      if (!ch || !state.playerId) return
+      if (!state.playerId) return
+
+      // Wait for lobby channel to become available (may not exist yet if playerId was just set)
+      let ch = channelRef.current || lobbyChannel
+      if (!ch) {
+        // Poll briefly for channel to be created by useEffect
+        for (let i = 0; i < 20; i++) {
+          await new Promise((r) => setTimeout(r, 100))
+          ch = channelRef.current || lobbyChannel
+          if (ch) break
+        }
+        if (!ch) return
+      }
 
       // Wait for channel to be subscribed before tracking
       if (subscribeReady) await subscribeReady
