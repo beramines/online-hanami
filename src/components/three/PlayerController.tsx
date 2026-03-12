@@ -34,12 +34,14 @@ export function PlayerController() {
   const updatePlayer = useGameStore((s) => s.updatePlayer)
 
   const prevCameraModeRef = useRef(useCameraStore.getState().mode)
+  const cameraModeJustChanged = useRef(false)
 
   useFrame((_, delta) => {
     const cameraMode = useCameraStore.getState().mode
     // Reset pitch on camera mode switch to avoid jarring transitions
     if (cameraMode !== prevCameraModeRef.current) {
       cameraPitchRef.current = 0
+      cameraModeJustChanged.current = true
       prevCameraModeRef.current = cameraMode
     }
     const moveDir = new THREE.Vector3()
@@ -146,7 +148,13 @@ export function PlayerController() {
         const minElevation = Math.asin(MIN_CAMERA_Y / THIRD_PERSON_DISTANCE)
         cameraPitchRef.current = Math.max(cameraPitchRef.current, minElevation - THIRD_PERSON_BASE_ELEVATION)
       }
-      camera.position.lerp(targetCamPos, 0.08)
+      // Snap camera immediately on mode switch to avoid giant name tag
+      if (cameraModeJustChanged.current) {
+        camera.position.copy(targetCamPos)
+        cameraModeJustChanged.current = false
+      } else {
+        camera.position.lerp(targetCamPos, 0.08)
+      }
       camera.lookAt(
         positionRef.current.x,
         positionRef.current.y + 1.2,
