@@ -13,19 +13,19 @@ export function Scene() {
   return (
     <Canvas
       camera={{ position: [0, 5, 10], fov: 60 }}
-      shadows
+      shadows={{ type: THREE.PCFShadowMap }}
       gl={{
         toneMapping: THREE.ACESFilmicToneMapping,
-        toneMappingExposure: 1.1,
+        toneMappingExposure: 1.2,
       }}
       style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
     >
       <Suspense fallback={null}>
-        <ambientLight intensity={0.65} color="#fff5e6" />
+        <ambientLight intensity={0.75} color="#fff5e6" />
         <directionalLight
           position={[8, 12, 6]}
           intensity={1.2}
-          color="#ffe4b5"
+          color="#fff0e0"
           castShadow
           shadow-mapSize={[2048, 2048]}
           shadow-camera-far={50}
@@ -34,7 +34,7 @@ export function Scene() {
           shadow-camera-top={25}
           shadow-camera-bottom={-25}
         />
-        <hemisphereLight args={['#ffd6e0', '#9ae6b4', 0.4]} />
+        <hemisphereLight args={['#ffd6e0', '#c8e6c0', 0.4]} />
 
         <Sky
           sunPosition={[100, 20, 100]}

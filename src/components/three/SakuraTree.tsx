@@ -363,7 +363,6 @@ export function SakuraTree({ position = [0, 0, 0], scale = 1 }: SakuraTreeProps)
               key={`b${i}`}
               position={[(sx + ex) / 2, (sy + ey) / 2, (sz + ez) / 2]}
               rotation={euler}
-              castShadow
             >
               <cylinderGeometry args={[branch.radiusEnd, branch.radiusStart, length, 6]} />
               <meshStandardMaterial color={i === 0 ? '#6b4226' : '#7a5230'} roughness={0.92} />
@@ -374,13 +373,12 @@ export function SakuraTree({ position = [0, 0, 0], scale = 1 }: SakuraTreeProps)
         <instancedMesh
           ref={meshRef}
           args={[flowerGeo, undefined, flowerData.count]}
-          castShadow
         >
           <meshStandardMaterial
             vertexColors
-            emissive="#ffb7c5"
-            emissiveIntensity={0.04}
-            roughness={0.45}
+            emissive="#ffc0cb"
+            emissiveIntensity={0.35}
+            roughness={0.3}
             transparent
             opacity={0.93}
             side={THREE.DoubleSide}
