@@ -107,4 +107,8 @@ export class VoicePeerConnection {
   get connectionState() {
     return this.pc.connectionState
   }
+
+  get signalingState() {
+    return this.pc.signalingState
+  }
 }

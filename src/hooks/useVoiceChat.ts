@@ -25,6 +25,7 @@ export function useVoiceChat() {
   const peersRef = useRef<Map<string, VoicePeerConnection>>(new Map())
   const audioContextRef = useRef<AudioContext | null>(null)
   const audioSourcesRef = useRef<Map<string, MediaStreamAudioSourceNode>>(new Map())
+  const connectedPlayerIdsRef = useRef<string>('')
 
   // Handle incoming voice signals
   useEffect(() => {
@@ -39,12 +40,25 @@ export function useVoiceChat() {
         let peer = peersRef.current.get(fromId)
 
         if (signal.type === 'offer') {
+          // Close existing peer before creating a new one for re-negotiation
+          if (peer) {
+            peer.close()
+            peersRef.current.delete(fromId)
+            const source = audioSourcesRef.current.get(fromId)
+            if (source) {
+              source.disconnect()
+              audioSourcesRef.current.delete(fromId)
+            }
+          }
           peer = createPeer(fromId)
           if (streamRef.current) peer.addLocalStream(streamRef.current)
           const answer = await peer.createAnswer(signal.data as RTCSessionDescriptionInit)
           broadcastSignal({ type: 'answer', from: playerId, to: fromId, data: answer })
         } else if (signal.type === 'answer' && peer) {
-          await peer.setAnswer(signal.data as RTCSessionDescriptionInit)
+          // Only set answer if we're expecting one
+          if (peer.signalingState === 'have-local-offer') {
+            await peer.setAnswer(signal.data as RTCSessionDescriptionInit)
+          }
         } else if (signal.type === 'ice-candidate' && peer) {
           await peer.addIceCandidate(signal.data as RTCIceCandidateInit)
         }
@@ -62,6 +76,11 @@ export function useVoiceChat() {
     if (!isVoiceEnabled || !playerId || !streamRef.current || !isSupabaseConfigured) return
 
     const otherPlayers = Object.keys(players).filter((id) => id !== playerId)
+    const playerIdsKey = otherPlayers.sort().join(',')
+
+    // Skip if player list hasn't changed (avoid re-runs from position updates)
+    if (playerIdsKey === connectedPlayerIdsRef.current) return
+    connectedPlayerIdsRef.current = playerIdsKey
 
     // Connect to new players
     for (const otherId of otherPlayers) {
@@ -77,7 +96,6 @@ export function useVoiceChat() {
         peer.close()
         removePeer(peerId)
         peersRef.current.delete(peerId)
-        // Clean up audio source
         const source = audioSourcesRef.current.get(peerId)
         if (source) {
           source.disconnect()
