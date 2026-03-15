@@ -24,6 +24,7 @@ export function useVoiceChat() {
   const streamRef = useRef<MediaStream | null>(null)
   const peersRef = useRef<Map<string, VoicePeerConnection>>(new Map())
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map())
+  const notifiedPeersRef = useRef<Set<string>>(new Set())
 
   const cleanupPeer = (peerId: string) => {
     const peer = peersRef.current.get(peerId)
@@ -98,10 +99,9 @@ export function useVoiceChat() {
     const otherPlayerIds = Object.keys(players).filter((id) => id !== playerId)
 
     for (const otherId of otherPlayerIds) {
-      if (!peersRef.current.has(otherId)) {
-        // Notify each player that we're voice-ready
+      if (!peersRef.current.has(otherId) && !notifiedPeersRef.current.has(otherId)) {
+        notifiedPeersRef.current.add(otherId)
         broadcastSignal({ type: 'voice-ready', from: playerId, to: otherId, data: null })
-        // If our ID is greater, we also initiate immediately
         if (playerId > otherId) {
           initiateConnection(otherId)
         }
@@ -113,6 +113,7 @@ export function useVoiceChat() {
     for (const peerId of peersRef.current.keys()) {
       if (!currentPlayerIds.has(peerId)) {
         cleanupPeer(peerId)
+        notifiedPeersRef.current.delete(peerId)
       }
     }
   }, [isVoiceEnabled, playerId, players])
@@ -197,6 +198,7 @@ export function useVoiceChat() {
       audio.srcObject = null
     }
     audioElementsRef.current.clear()
+    notifiedPeersRef.current.clear()
 
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop())
