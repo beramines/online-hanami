@@ -1,8 +1,31 @@
-const ICE_SERVERS: RTCConfiguration = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-  ],
+function buildIceServers(): RTCConfiguration {
+  const username = import.meta.env.VITE_TURN_USERNAME
+  const credential = import.meta.env.VITE_TURN_CREDENTIAL
+
+  const iceServers: RTCIceServer[] = [
+    { urls: 'stun:stun.relay.metered.ca:80' },
+  ]
+
+  if (username && credential) {
+    iceServers.push(
+      { urls: 'turn:global.relay.metered.ca:80', username, credential },
+      { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username, credential },
+      { urls: 'turn:global.relay.metered.ca:443', username, credential },
+      { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username, credential },
+    )
+  } else {
+    console.warn('[WebRTC] TURN credentials not configured, using STUN only')
+    iceServers.push({ urls: 'stun:stun.l.google.com:19302' })
+  }
+
+  return { iceServers }
+}
+
+let cachedConfig: RTCConfiguration | null = null
+
+export function getIceServers(): RTCConfiguration {
+  if (!cachedConfig) cachedConfig = buildIceServers()
+  return cachedConfig
 }
 
 export class VoicePeerConnection {
@@ -12,9 +35,10 @@ export class VoicePeerConnection {
   private remoteDescriptionSet = false
   onStream: ((stream: MediaStream) => void) | null = null
   onIceCandidate: ((candidate: RTCIceCandidateInit) => void) | null = null
+  onConnectionStateChange: ((state: RTCPeerConnectionState) => void) | null = null
 
-  constructor() {
-    this.pc = new RTCPeerConnection(ICE_SERVERS)
+  constructor(config: RTCConfiguration) {
+    this.pc = new RTCPeerConnection(config)
     this.remoteStream = new MediaStream()
 
     this.pc.ontrack = (event) => {
@@ -27,6 +51,10 @@ export class VoicePeerConnection {
       if (event.candidate) {
         this.onIceCandidate?.(event.candidate.toJSON())
       }
+    }
+
+    this.pc.onconnectionstatechange = () => {
+      this.onConnectionStateChange?.(this.pc.connectionState)
     }
   }
 

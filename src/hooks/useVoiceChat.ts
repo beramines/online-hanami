@@ -1,7 +1,7 @@
 import { useCallback, useRef, useEffect } from 'react'
 import { useVoiceStore } from '../stores/voiceStore'
 import { useGameStore } from '../stores/gameStore'
-import { VoicePeerConnection } from '../lib/webrtc'
+import { VoicePeerConnection, getIceServers } from '../lib/webrtc'
 import { isSupabaseConfigured } from '../lib/supabase'
 
 interface VoiceSignal {
@@ -31,22 +31,25 @@ export function useVoiceChat() {
     if (!isVoiceEnabled || !playerId || !isSupabaseConfigured) return
 
     const handleSignal = async (e: Event) => {
-      const signal = (e as CustomEvent).detail as VoiceSignal
-      if (signal.to !== playerId) return
+      try {
+        const signal = (e as CustomEvent).detail as VoiceSignal
+        if (signal.to !== playerId) return
 
-      const fromId = signal.from
-      let peer = peersRef.current.get(fromId)
+        const fromId = signal.from
+        let peer = peersRef.current.get(fromId)
 
-      if (signal.type === 'offer') {
-        // Create new peer for incoming offer
-        peer = createPeer(fromId)
-        if (streamRef.current) peer.addLocalStream(streamRef.current)
-        const answer = await peer.createAnswer(signal.data as RTCSessionDescriptionInit)
-        broadcastSignal({ type: 'answer', from: playerId, to: fromId, data: answer })
-      } else if (signal.type === 'answer' && peer) {
-        await peer.setAnswer(signal.data as RTCSessionDescriptionInit)
-      } else if (signal.type === 'ice-candidate' && peer) {
-        await peer.addIceCandidate(signal.data as RTCIceCandidateInit)
+        if (signal.type === 'offer') {
+          peer = createPeer(fromId)
+          if (streamRef.current) peer.addLocalStream(streamRef.current)
+          const answer = await peer.createAnswer(signal.data as RTCSessionDescriptionInit)
+          broadcastSignal({ type: 'answer', from: playerId, to: fromId, data: answer })
+        } else if (signal.type === 'answer' && peer) {
+          await peer.setAnswer(signal.data as RTCSessionDescriptionInit)
+        } else if (signal.type === 'ice-candidate' && peer) {
+          await peer.addIceCandidate(signal.data as RTCIceCandidateInit)
+        }
+      } catch (err) {
+        console.error('[Voice] Signal handling error:', err)
       }
     }
 
@@ -85,11 +88,11 @@ export function useVoiceChat() {
   }, [isVoiceEnabled, playerId, players])
 
   const createPeer = (remoteId: string): VoicePeerConnection => {
-    const peer = new VoicePeerConnection()
+    const config = getIceServers()
+    const peer = new VoicePeerConnection(config)
 
     peer.onStream = (stream) => {
       addPeer(remoteId, { playerId: remoteId, stream, isMuted: false })
-      // Use AudioContext (created during user gesture in startVoice) to play remote audio
       if (audioContextRef.current) {
         const source = audioContextRef.current.createMediaStreamSource(stream)
         source.connect(audioContextRef.current.destination)
@@ -106,15 +109,34 @@ export function useVoiceChat() {
       })
     }
 
+    peer.onConnectionStateChange = (state) => {
+      console.log(`[Voice] Peer ${remoteId.slice(0, 8)}: ${state}`)
+      if (state === 'failed') {
+        console.warn(`[Voice] Connection to ${remoteId.slice(0, 8)} failed, cleaning up`)
+        peer.close()
+        removePeer(remoteId)
+        peersRef.current.delete(remoteId)
+        const source = audioSourcesRef.current.get(remoteId)
+        if (source) {
+          source.disconnect()
+          audioSourcesRef.current.delete(remoteId)
+        }
+      }
+    }
+
     peersRef.current.set(remoteId, peer)
     return peer
   }
 
   const initiateConnection = async (remoteId: string) => {
-    const peer = createPeer(remoteId)
-    if (streamRef.current) peer.addLocalStream(streamRef.current)
-    const offer = await peer.createOffer()
-    broadcastSignal({ type: 'offer', from: playerId!, to: remoteId, data: offer })
+    try {
+      const peer = createPeer(remoteId)
+      if (streamRef.current) peer.addLocalStream(streamRef.current)
+      const offer = await peer.createOffer()
+      broadcastSignal({ type: 'offer', from: playerId!, to: remoteId, data: offer })
+    } catch (err) {
+      console.error('[Voice] Failed to initiate connection:', err)
+    }
   }
 
   const broadcastSignal = (signal: VoiceSignal) => {
@@ -127,11 +149,9 @@ export function useVoiceChat() {
       streamRef.current = stream
       setLocalStream(stream)
 
-      // Create AudioContext during user gesture so autoplay policy is satisfied
       if (!audioContextRef.current) {
         audioContextRef.current = new AudioContext()
       }
-      // Resume in case it was suspended
       if (audioContextRef.current.state === 'suspended') {
         await audioContextRef.current.resume()
       }
