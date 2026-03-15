@@ -23,6 +23,8 @@ export function useVoiceChat() {
   const players = useGameStore((s) => s.players)
   const streamRef = useRef<MediaStream | null>(null)
   const peersRef = useRef<Map<string, VoicePeerConnection>>(new Map())
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const audioSourcesRef = useRef<Map<string, MediaStreamAudioSourceNode>>(new Map())
 
   // Handle incoming voice signals
   useEffect(() => {
@@ -52,14 +54,32 @@ export function useVoiceChat() {
     return () => window.removeEventListener('voice-signal', handleSignal)
   }, [isVoiceEnabled, playerId])
 
-  // Connect to existing players when voice is enabled
+  // Connect to existing players when voice is enabled, and clean up departed players
   useEffect(() => {
     if (!isVoiceEnabled || !playerId || !streamRef.current || !isSupabaseConfigured) return
 
     const otherPlayers = Object.keys(players).filter((id) => id !== playerId)
+
+    // Connect to new players
     for (const otherId of otherPlayers) {
       if (!peersRef.current.has(otherId)) {
         initiateConnection(otherId)
+      }
+    }
+
+    // Clean up connections for players who left
+    const currentPlayerIds = new Set(otherPlayers)
+    for (const [peerId, peer] of peersRef.current) {
+      if (!currentPlayerIds.has(peerId)) {
+        peer.close()
+        removePeer(peerId)
+        peersRef.current.delete(peerId)
+        // Clean up audio source
+        const source = audioSourcesRef.current.get(peerId)
+        if (source) {
+          source.disconnect()
+          audioSourcesRef.current.delete(peerId)
+        }
       }
     }
   }, [isVoiceEnabled, playerId, players])
@@ -69,10 +89,12 @@ export function useVoiceChat() {
 
     peer.onStream = (stream) => {
       addPeer(remoteId, { playerId: remoteId, stream, isMuted: false })
-      // Play remote audio
-      const audio = new Audio()
-      audio.srcObject = stream
-      audio.play().catch(() => {})
+      // Use AudioContext (created during user gesture in startVoice) to play remote audio
+      if (audioContextRef.current) {
+        const source = audioContextRef.current.createMediaStreamSource(stream)
+        source.connect(audioContextRef.current.destination)
+        audioSourcesRef.current.set(remoteId, source)
+      }
     }
 
     peer.onIceCandidate = (candidate) => {
@@ -104,6 +126,16 @@ export function useVoiceChat() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
       setLocalStream(stream)
+
+      // Create AudioContext during user gesture so autoplay policy is satisfied
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContext()
+      }
+      // Resume in case it was suspended
+      if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume()
+      }
+
       setVoiceEnabled(true)
     } catch (err) {
       console.error('Failed to access microphone:', err)
@@ -118,6 +150,18 @@ export function useVoiceChat() {
       removePeer(id)
     }
     peersRef.current.clear()
+
+    // Disconnect all audio sources
+    for (const source of audioSourcesRef.current.values()) {
+      source.disconnect()
+    }
+    audioSourcesRef.current.clear()
+
+    // Close AudioContext
+    if (audioContextRef.current) {
+      audioContextRef.current.close()
+      audioContextRef.current = null
+    }
 
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop())
@@ -151,6 +195,12 @@ export function useVoiceChat() {
     return () => {
       for (const peer of peersRef.current.values()) {
         peer.close()
+      }
+      for (const source of audioSourcesRef.current.values()) {
+        source.disconnect()
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close()
       }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop())
