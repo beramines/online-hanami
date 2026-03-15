@@ -1,14 +1,14 @@
 import { useCallback, useRef, useEffect } from 'react'
 import { useVoiceStore } from '../stores/voiceStore'
 import { useGameStore } from '../stores/gameStore'
-import { VoicePeerConnection } from '../lib/webrtc'
+import { VoicePeerConnection, getIceServers } from '../lib/webrtc'
 import { isSupabaseConfigured } from '../lib/supabase'
 
 interface VoiceSignal {
-  type: 'offer' | 'answer' | 'ice-candidate'
+  type: 'offer' | 'answer' | 'ice-candidate' | 'voice-ready'
   from: string
   to: string
-  data: RTCSessionDescriptionInit | RTCIceCandidateInit
+  data: RTCSessionDescriptionInit | RTCIceCandidateInit | null
 }
 
 export function useVoiceChat() {
@@ -23,28 +23,66 @@ export function useVoiceChat() {
   const players = useGameStore((s) => s.players)
   const streamRef = useRef<MediaStream | null>(null)
   const peersRef = useRef<Map<string, VoicePeerConnection>>(new Map())
+  const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map())
+
+  const cleanupPeer = (peerId: string) => {
+    const peer = peersRef.current.get(peerId)
+    if (peer) {
+      peer.close()
+      peersRef.current.delete(peerId)
+    }
+    removePeer(peerId)
+    const audio = audioElementsRef.current.get(peerId)
+    if (audio) {
+      audio.pause()
+      audio.srcObject = null
+      audioElementsRef.current.delete(peerId)
+    }
+  }
 
   // Handle incoming voice signals
   useEffect(() => {
     if (!isVoiceEnabled || !playerId || !isSupabaseConfigured) return
 
     const handleSignal = async (e: Event) => {
-      const signal = (e as CustomEvent).detail as VoiceSignal
-      if (signal.to !== playerId) return
+      try {
+        const signal = (e as CustomEvent).detail as VoiceSignal
+        if (signal.to !== playerId) return
 
-      const fromId = signal.from
-      let peer = peersRef.current.get(fromId)
+        const fromId = signal.from
 
-      if (signal.type === 'offer') {
-        // Create new peer for incoming offer
-        peer = createPeer(fromId)
-        if (streamRef.current) peer.addLocalStream(streamRef.current)
-        const answer = await peer.createAnswer(signal.data as RTCSessionDescriptionInit)
-        broadcastSignal({ type: 'answer', from: playerId, to: fromId, data: answer })
-      } else if (signal.type === 'answer' && peer) {
-        await peer.setAnswer(signal.data as RTCSessionDescriptionInit)
-      } else if (signal.type === 'ice-candidate' && peer) {
-        await peer.addIceCandidate(signal.data as RTCIceCandidateInit)
+        // When a remote peer announces voice-ready, initiate connection
+        // The peer with the higher ID sends the offer to avoid duplicates
+        if (signal.type === 'voice-ready') {
+          if (!peersRef.current.has(fromId) && streamRef.current && playerId > fromId) {
+            initiateConnection(fromId)
+          }
+          return
+        }
+
+        const existingPeer = peersRef.current.get(fromId)
+
+        if (signal.type === 'offer') {
+          // Glare resolution
+          if (existingPeer && existingPeer.signalingState === 'have-local-offer') {
+            if (playerId > fromId) return
+          }
+
+          if (existingPeer) cleanupPeer(fromId)
+
+          const peer = createPeer(fromId)
+          if (streamRef.current) peer.addLocalStream(streamRef.current)
+          const answer = await peer.createAnswer(signal.data as RTCSessionDescriptionInit)
+          broadcastSignal({ type: 'answer', from: playerId, to: fromId, data: answer })
+        } else if (signal.type === 'answer' && existingPeer) {
+          if (existingPeer.signalingState === 'have-local-offer') {
+            await existingPeer.setAnswer(signal.data as RTCSessionDescriptionInit)
+          }
+        } else if (signal.type === 'ice-candidate' && existingPeer) {
+          await existingPeer.addIceCandidate(signal.data as RTCIceCandidateInit)
+        }
+      } catch (err) {
+        console.error('[Voice] Signal handling error:', err)
       }
     }
 
@@ -52,27 +90,53 @@ export function useVoiceChat() {
     return () => window.removeEventListener('voice-signal', handleSignal)
   }, [isVoiceEnabled, playerId])
 
-  // Connect to existing players when voice is enabled
+  // When voice is enabled, broadcast voice-ready to all existing players
+  // so they know to initiate a connection with us
   useEffect(() => {
     if (!isVoiceEnabled || !playerId || !streamRef.current || !isSupabaseConfigured) return
 
-    const otherPlayers = Object.keys(players).filter((id) => id !== playerId)
-    for (const otherId of otherPlayers) {
+    const otherPlayerIds = Object.keys(players).filter((id) => id !== playerId)
+
+    for (const otherId of otherPlayerIds) {
       if (!peersRef.current.has(otherId)) {
-        initiateConnection(otherId)
+        // Notify each player that we're voice-ready
+        broadcastSignal({ type: 'voice-ready', from: playerId, to: otherId, data: null })
+        // If our ID is greater, we also initiate immediately
+        if (playerId > otherId) {
+          initiateConnection(otherId)
+        }
+      }
+    }
+
+    // Clean up connections for players who left
+    const currentPlayerIds = new Set(otherPlayerIds)
+    for (const peerId of peersRef.current.keys()) {
+      if (!currentPlayerIds.has(peerId)) {
+        cleanupPeer(peerId)
       }
     }
   }, [isVoiceEnabled, playerId, players])
 
   const createPeer = (remoteId: string): VoicePeerConnection => {
-    const peer = new VoicePeerConnection()
+    const config = getIceServers()
+    const peer = new VoicePeerConnection(config)
 
     peer.onStream = (stream) => {
       addPeer(remoteId, { playerId: remoteId, stream, isMuted: false })
-      // Play remote audio
+
+      const oldAudio = audioElementsRef.current.get(remoteId)
+      if (oldAudio) {
+        oldAudio.pause()
+        oldAudio.srcObject = null
+      }
+
       const audio = new Audio()
       audio.srcObject = stream
-      audio.play().catch(() => {})
+      audio.autoplay = true
+      audio.play().catch((err) => {
+        console.warn('[Voice] Audio play failed:', err)
+      })
+      audioElementsRef.current.set(remoteId, audio)
     }
 
     peer.onIceCandidate = (candidate) => {
@@ -84,15 +148,25 @@ export function useVoiceChat() {
       })
     }
 
+    peer.onConnectionStateChange = (state) => {
+      console.log(`[Voice] Peer ${remoteId.slice(0, 8)}: ${state}`)
+    }
+
     peersRef.current.set(remoteId, peer)
     return peer
   }
 
   const initiateConnection = async (remoteId: string) => {
-    const peer = createPeer(remoteId)
-    if (streamRef.current) peer.addLocalStream(streamRef.current)
-    const offer = await peer.createOffer()
-    broadcastSignal({ type: 'offer', from: playerId!, to: remoteId, data: offer })
+    // Don't create duplicate connections
+    if (peersRef.current.has(remoteId)) return
+    try {
+      const peer = createPeer(remoteId)
+      if (streamRef.current) peer.addLocalStream(streamRef.current)
+      const offer = await peer.createOffer()
+      broadcastSignal({ type: 'offer', from: playerId!, to: remoteId, data: offer })
+    } catch (err) {
+      console.error('[Voice] Failed to initiate connection:', err)
+    }
   }
 
   const broadcastSignal = (signal: VoiceSignal) => {
@@ -112,12 +186,17 @@ export function useVoiceChat() {
   }, [setLocalStream, setVoiceEnabled])
 
   const stopVoice = useCallback(() => {
-    // Close all peer connections
     for (const [id, peer] of peersRef.current) {
       peer.close()
       removePeer(id)
     }
     peersRef.current.clear()
+
+    for (const audio of audioElementsRef.current.values()) {
+      audio.pause()
+      audio.srcObject = null
+    }
+    audioElementsRef.current.clear()
 
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop())
@@ -151,6 +230,10 @@ export function useVoiceChat() {
     return () => {
       for (const peer of peersRef.current.values()) {
         peer.close()
+      }
+      for (const audio of audioElementsRef.current.values()) {
+        audio.pause()
+        audio.srcObject = null
       }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop())
