@@ -23,8 +23,7 @@ export function useVoiceChat() {
   const players = useGameStore((s) => s.players)
   const streamRef = useRef<MediaStream | null>(null)
   const peersRef = useRef<Map<string, VoicePeerConnection>>(new Map())
-  const audioContextRef = useRef<AudioContext | null>(null)
-  const audioSourcesRef = useRef<Map<string, MediaStreamAudioSourceNode>>(new Map())
+  const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map())
 
   const cleanupPeer = (peerId: string) => {
     const peer = peersRef.current.get(peerId)
@@ -33,10 +32,11 @@ export function useVoiceChat() {
       peersRef.current.delete(peerId)
     }
     removePeer(peerId)
-    const source = audioSourcesRef.current.get(peerId)
-    if (source) {
-      source.disconnect()
-      audioSourcesRef.current.delete(peerId)
+    const audio = audioElementsRef.current.get(peerId)
+    if (audio) {
+      audio.pause()
+      audio.srcObject = null
+      audioElementsRef.current.delete(peerId)
     }
   }
 
@@ -57,13 +57,10 @@ export function useVoiceChat() {
           // (higher ID) ignores the incoming offer and keeps its own.
           if (existingPeer && existingPeer.signalingState === 'have-local-offer') {
             if (playerId > fromId) {
-              // We are impolite — ignore their offer, they will accept our answer
               return
             }
-            // We are polite — discard our offer and accept theirs
           }
 
-          // Close existing peer if any
           if (existingPeer) {
             cleanupPeer(fromId)
           }
@@ -94,14 +91,12 @@ export function useVoiceChat() {
 
     const otherPlayerIds = Object.keys(players).filter((id) => id !== playerId)
 
-    // Connect to new players (only initiate if our ID is greater to avoid duplicate offers)
     for (const otherId of otherPlayerIds) {
       if (!peersRef.current.has(otherId) && playerId > otherId) {
         initiateConnection(otherId)
       }
     }
 
-    // Clean up connections for players who left
     const currentPlayerIds = new Set(otherPlayerIds)
     for (const peerId of peersRef.current.keys()) {
       if (!currentPlayerIds.has(peerId)) {
@@ -116,14 +111,23 @@ export function useVoiceChat() {
 
     peer.onStream = (stream) => {
       addPeer(remoteId, { playerId: remoteId, stream, isMuted: false })
-      if (audioContextRef.current) {
-        // Disconnect old source if exists
-        const oldSource = audioSourcesRef.current.get(remoteId)
-        if (oldSource) oldSource.disconnect()
-        const source = audioContextRef.current.createMediaStreamSource(stream)
-        source.connect(audioContextRef.current.destination)
-        audioSourcesRef.current.set(remoteId, source)
+
+      // Clean up old audio element if exists
+      const oldAudio = audioElementsRef.current.get(remoteId)
+      if (oldAudio) {
+        oldAudio.pause()
+        oldAudio.srcObject = null
       }
+
+      // Use <audio> element for playback — AudioContext.createMediaStreamSource
+      // causes Chrome to discard received WebRTC packets
+      const audio = new Audio()
+      audio.srcObject = stream
+      audio.autoplay = true
+      audio.play().catch((err) => {
+        console.warn('[Voice] Audio play failed:', err)
+      })
+      audioElementsRef.current.set(remoteId, audio)
     }
 
     peer.onIceCandidate = (candidate) => {
@@ -163,14 +167,6 @@ export function useVoiceChat() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
       setLocalStream(stream)
-
-      if (!audioContextRef.current) {
-        audioContextRef.current = new AudioContext()
-      }
-      if (audioContextRef.current.state === 'suspended') {
-        await audioContextRef.current.resume()
-      }
-
       setVoiceEnabled(true)
     } catch (err) {
       console.error('Failed to access microphone:', err)
@@ -185,15 +181,11 @@ export function useVoiceChat() {
     }
     peersRef.current.clear()
 
-    for (const source of audioSourcesRef.current.values()) {
-      source.disconnect()
+    for (const audio of audioElementsRef.current.values()) {
+      audio.pause()
+      audio.srcObject = null
     }
-    audioSourcesRef.current.clear()
-
-    if (audioContextRef.current) {
-      audioContextRef.current.close()
-      audioContextRef.current = null
-    }
+    audioElementsRef.current.clear()
 
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop())
@@ -228,11 +220,9 @@ export function useVoiceChat() {
       for (const peer of peersRef.current.values()) {
         peer.close()
       }
-      for (const source of audioSourcesRef.current.values()) {
-        source.disconnect()
-      }
-      if (audioContextRef.current) {
-        audioContextRef.current.close()
+      for (const audio of audioElementsRef.current.values()) {
+        audio.pause()
+        audio.srcObject = null
       }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop())
