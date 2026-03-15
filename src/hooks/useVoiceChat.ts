@@ -5,10 +5,10 @@ import { VoicePeerConnection, getIceServers } from '../lib/webrtc'
 import { isSupabaseConfigured } from '../lib/supabase'
 
 interface VoiceSignal {
-  type: 'offer' | 'answer' | 'ice-candidate'
+  type: 'offer' | 'answer' | 'ice-candidate' | 'voice-ready'
   from: string
   to: string
-  data: RTCSessionDescriptionInit | RTCIceCandidateInit
+  data: RTCSessionDescriptionInit | RTCIceCandidateInit | null
 }
 
 export function useVoiceChat() {
@@ -50,20 +50,25 @@ export function useVoiceChat() {
         if (signal.to !== playerId) return
 
         const fromId = signal.from
+
+        // When a remote peer announces voice-ready, initiate connection
+        // The peer with the higher ID sends the offer to avoid duplicates
+        if (signal.type === 'voice-ready') {
+          if (!peersRef.current.has(fromId) && streamRef.current && playerId > fromId) {
+            initiateConnection(fromId)
+          }
+          return
+        }
+
         const existingPeer = peersRef.current.get(fromId)
 
         if (signal.type === 'offer') {
-          // Glare resolution: if we both sent offers, the "impolite" peer
-          // (higher ID) ignores the incoming offer and keeps its own.
+          // Glare resolution
           if (existingPeer && existingPeer.signalingState === 'have-local-offer') {
-            if (playerId > fromId) {
-              return
-            }
+            if (playerId > fromId) return
           }
 
-          if (existingPeer) {
-            cleanupPeer(fromId)
-          }
+          if (existingPeer) cleanupPeer(fromId)
 
           const peer = createPeer(fromId)
           if (streamRef.current) peer.addLocalStream(streamRef.current)
@@ -85,18 +90,25 @@ export function useVoiceChat() {
     return () => window.removeEventListener('voice-signal', handleSignal)
   }, [isVoiceEnabled, playerId])
 
-  // Connect to new players / clean up departed players
+  // When voice is enabled, broadcast voice-ready to all existing players
+  // so they know to initiate a connection with us
   useEffect(() => {
     if (!isVoiceEnabled || !playerId || !streamRef.current || !isSupabaseConfigured) return
 
     const otherPlayerIds = Object.keys(players).filter((id) => id !== playerId)
 
     for (const otherId of otherPlayerIds) {
-      if (!peersRef.current.has(otherId) && playerId > otherId) {
-        initiateConnection(otherId)
+      if (!peersRef.current.has(otherId)) {
+        // Notify each player that we're voice-ready
+        broadcastSignal({ type: 'voice-ready', from: playerId, to: otherId, data: null })
+        // If our ID is greater, we also initiate immediately
+        if (playerId > otherId) {
+          initiateConnection(otherId)
+        }
       }
     }
 
+    // Clean up connections for players who left
     const currentPlayerIds = new Set(otherPlayerIds)
     for (const peerId of peersRef.current.keys()) {
       if (!currentPlayerIds.has(peerId)) {
@@ -112,15 +124,12 @@ export function useVoiceChat() {
     peer.onStream = (stream) => {
       addPeer(remoteId, { playerId: remoteId, stream, isMuted: false })
 
-      // Clean up old audio element if exists
       const oldAudio = audioElementsRef.current.get(remoteId)
       if (oldAudio) {
         oldAudio.pause()
         oldAudio.srcObject = null
       }
 
-      // Use <audio> element for playback — AudioContext.createMediaStreamSource
-      // causes Chrome to discard received WebRTC packets
       const audio = new Audio()
       audio.srcObject = stream
       audio.autoplay = true
@@ -148,6 +157,8 @@ export function useVoiceChat() {
   }
 
   const initiateConnection = async (remoteId: string) => {
+    // Don't create duplicate connections
+    if (peersRef.current.has(remoteId)) return
     try {
       const peer = createPeer(remoteId)
       if (streamRef.current) peer.addLocalStream(streamRef.current)
