@@ -25,7 +25,20 @@ export function useVoiceChat() {
   const peersRef = useRef<Map<string, VoicePeerConnection>>(new Map())
   const audioContextRef = useRef<AudioContext | null>(null)
   const audioSourcesRef = useRef<Map<string, MediaStreamAudioSourceNode>>(new Map())
-  const connectedPlayerIdsRef = useRef<string>('')
+
+  const cleanupPeer = (peerId: string) => {
+    const peer = peersRef.current.get(peerId)
+    if (peer) {
+      peer.close()
+      peersRef.current.delete(peerId)
+    }
+    removePeer(peerId)
+    const source = audioSourcesRef.current.get(peerId)
+    if (source) {
+      source.disconnect()
+      audioSourcesRef.current.delete(peerId)
+    }
+  }
 
   // Handle incoming voice signals
   useEffect(() => {
@@ -37,30 +50,34 @@ export function useVoiceChat() {
         if (signal.to !== playerId) return
 
         const fromId = signal.from
-        let peer = peersRef.current.get(fromId)
+        const existingPeer = peersRef.current.get(fromId)
 
         if (signal.type === 'offer') {
-          // Close existing peer before creating a new one for re-negotiation
-          if (peer) {
-            peer.close()
-            peersRef.current.delete(fromId)
-            const source = audioSourcesRef.current.get(fromId)
-            if (source) {
-              source.disconnect()
-              audioSourcesRef.current.delete(fromId)
+          // Glare resolution: if we both sent offers, the "impolite" peer
+          // (higher ID) ignores the incoming offer and keeps its own.
+          if (existingPeer && existingPeer.signalingState === 'have-local-offer') {
+            if (playerId > fromId) {
+              // We are impolite — ignore their offer, they will accept our answer
+              return
             }
+            // We are polite — discard our offer and accept theirs
           }
-          peer = createPeer(fromId)
+
+          // Close existing peer if any
+          if (existingPeer) {
+            cleanupPeer(fromId)
+          }
+
+          const peer = createPeer(fromId)
           if (streamRef.current) peer.addLocalStream(streamRef.current)
           const answer = await peer.createAnswer(signal.data as RTCSessionDescriptionInit)
           broadcastSignal({ type: 'answer', from: playerId, to: fromId, data: answer })
-        } else if (signal.type === 'answer' && peer) {
-          // Only set answer if we're expecting one
-          if (peer.signalingState === 'have-local-offer') {
-            await peer.setAnswer(signal.data as RTCSessionDescriptionInit)
+        } else if (signal.type === 'answer' && existingPeer) {
+          if (existingPeer.signalingState === 'have-local-offer') {
+            await existingPeer.setAnswer(signal.data as RTCSessionDescriptionInit)
           }
-        } else if (signal.type === 'ice-candidate' && peer) {
-          await peer.addIceCandidate(signal.data as RTCIceCandidateInit)
+        } else if (signal.type === 'ice-candidate' && existingPeer) {
+          await existingPeer.addIceCandidate(signal.data as RTCIceCandidateInit)
         }
       } catch (err) {
         console.error('[Voice] Signal handling error:', err)
@@ -71,36 +88,24 @@ export function useVoiceChat() {
     return () => window.removeEventListener('voice-signal', handleSignal)
   }, [isVoiceEnabled, playerId])
 
-  // Connect to existing players when voice is enabled, and clean up departed players
+  // Connect to new players / clean up departed players
   useEffect(() => {
     if (!isVoiceEnabled || !playerId || !streamRef.current || !isSupabaseConfigured) return
 
-    const otherPlayers = Object.keys(players).filter((id) => id !== playerId)
-    const playerIdsKey = otherPlayers.sort().join(',')
+    const otherPlayerIds = Object.keys(players).filter((id) => id !== playerId)
 
-    // Skip if player list hasn't changed (avoid re-runs from position updates)
-    if (playerIdsKey === connectedPlayerIdsRef.current) return
-    connectedPlayerIdsRef.current = playerIdsKey
-
-    // Connect to new players
-    for (const otherId of otherPlayers) {
-      if (!peersRef.current.has(otherId)) {
+    // Connect to new players (only initiate if our ID is greater to avoid duplicate offers)
+    for (const otherId of otherPlayerIds) {
+      if (!peersRef.current.has(otherId) && playerId > otherId) {
         initiateConnection(otherId)
       }
     }
 
     // Clean up connections for players who left
-    const currentPlayerIds = new Set(otherPlayers)
-    for (const [peerId, peer] of peersRef.current) {
+    const currentPlayerIds = new Set(otherPlayerIds)
+    for (const peerId of peersRef.current.keys()) {
       if (!currentPlayerIds.has(peerId)) {
-        peer.close()
-        removePeer(peerId)
-        peersRef.current.delete(peerId)
-        const source = audioSourcesRef.current.get(peerId)
-        if (source) {
-          source.disconnect()
-          audioSourcesRef.current.delete(peerId)
-        }
+        cleanupPeer(peerId)
       }
     }
   }, [isVoiceEnabled, playerId, players])
@@ -112,6 +117,9 @@ export function useVoiceChat() {
     peer.onStream = (stream) => {
       addPeer(remoteId, { playerId: remoteId, stream, isMuted: false })
       if (audioContextRef.current) {
+        // Disconnect old source if exists
+        const oldSource = audioSourcesRef.current.get(remoteId)
+        if (oldSource) oldSource.disconnect()
         const source = audioContextRef.current.createMediaStreamSource(stream)
         source.connect(audioContextRef.current.destination)
         audioSourcesRef.current.set(remoteId, source)
@@ -129,17 +137,6 @@ export function useVoiceChat() {
 
     peer.onConnectionStateChange = (state) => {
       console.log(`[Voice] Peer ${remoteId.slice(0, 8)}: ${state}`)
-      if (state === 'failed') {
-        console.warn(`[Voice] Connection to ${remoteId.slice(0, 8)} failed, cleaning up`)
-        peer.close()
-        removePeer(remoteId)
-        peersRef.current.delete(remoteId)
-        const source = audioSourcesRef.current.get(remoteId)
-        if (source) {
-          source.disconnect()
-          audioSourcesRef.current.delete(remoteId)
-        }
-      }
     }
 
     peersRef.current.set(remoteId, peer)
@@ -182,20 +179,17 @@ export function useVoiceChat() {
   }, [setLocalStream, setVoiceEnabled])
 
   const stopVoice = useCallback(() => {
-    // Close all peer connections
     for (const [id, peer] of peersRef.current) {
       peer.close()
       removePeer(id)
     }
     peersRef.current.clear()
 
-    // Disconnect all audio sources
     for (const source of audioSourcesRef.current.values()) {
       source.disconnect()
     }
     audioSourcesRef.current.clear()
 
-    // Close AudioContext
     if (audioContextRef.current) {
       audioContextRef.current.close()
       audioContextRef.current = null
