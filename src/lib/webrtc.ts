@@ -1,30 +1,28 @@
-function buildIceServers(): RTCConfiguration {
-  const username = import.meta.env.VITE_TURN_USERNAME
-  const credential = import.meta.env.VITE_TURN_CREDENTIAL
-
-  const iceServers: RTCIceServer[] = [
+const STUN_ONLY_CONFIG: RTCConfiguration = {
+  iceServers: [
     { urls: 'stun:stun.relay.metered.ca:80' },
-  ]
-
-  if (username && credential) {
-    iceServers.push(
-      { urls: 'turn:global.relay.metered.ca:80', username, credential },
-      { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username, credential },
-      { urls: 'turn:global.relay.metered.ca:443', username, credential },
-      { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username, credential },
-    )
-  } else {
-    console.warn('[WebRTC] TURN credentials not configured, using STUN only')
-    iceServers.push({ urls: 'stun:stun.l.google.com:19302' })
-  }
-
-  return { iceServers }
+    { urls: 'stun:stun.l.google.com:19302' },
+  ],
 }
 
 let cachedConfig: RTCConfiguration | null = null
 
-export function getIceServers(): RTCConfiguration {
-  if (!cachedConfig) cachedConfig = buildIceServers()
+export async function getIceServers(): Promise<RTCConfiguration> {
+  if (cachedConfig) return cachedConfig
+
+  try {
+    const res = await fetch('/api/turn-credentials')
+    if (res.ok) {
+      const data = await res.json()
+      cachedConfig = { iceServers: data.iceServers }
+      return cachedConfig
+    }
+  } catch (err) {
+    console.warn('[WebRTC] Failed to fetch TURN credentials:', err)
+  }
+
+  console.warn('[WebRTC] Using STUN only (no TURN)')
+  cachedConfig = STUN_ONLY_CONFIG
   return cachedConfig
 }
 
@@ -42,7 +40,6 @@ export class VoicePeerConnection {
     this.remoteStream = new MediaStream()
 
     this.pc.ontrack = (event) => {
-      // Use event.track directly — event.streams[0] can be undefined in some browsers
       this.remoteStream.addTrack(event.track)
       this.onStream?.(this.remoteStream)
     }

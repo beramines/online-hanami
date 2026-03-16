@@ -90,7 +90,7 @@ export function useVoiceChat() {
 
           if (existingPeer) cleanupPeer(fromId)
 
-          const peer = createPeer(fromId)
+          const peer = await createPeer(fromId)
           if (activeStreamRef.current) peer.addLocalStream(activeStreamRef.current)
           const answer = await peer.createAnswer(signal.data as RTCSessionDescriptionInit)
           broadcastSignal({ type: 'answer', from: playerId, to: fromId, data: answer })
@@ -136,8 +136,8 @@ export function useVoiceChat() {
     }
   }, [isListening, playerId, players])
 
-  const createPeer = (remoteId: string): VoicePeerConnection => {
-    const config = getIceServers()
+  const createPeer = async (remoteId: string): Promise<VoicePeerConnection> => {
+    const config = await getIceServers()
     const peer = new VoicePeerConnection(config)
 
     peer.onStream = (stream) => {
@@ -182,7 +182,7 @@ export function useVoiceChat() {
   const initiateConnection = async (remoteId: string) => {
     if (peersRef.current.has(remoteId)) return
     try {
-      const peer = createPeer(remoteId)
+      const peer = await createPeer(remoteId)
       if (activeStreamRef.current) peer.addLocalStream(activeStreamRef.current)
       const offer = await peer.createOffer()
       broadcastSignal({ type: 'offer', from: playerId!, to: remoteId, data: offer })
