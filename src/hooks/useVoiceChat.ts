@@ -87,9 +87,14 @@ export function useVoiceChat() {
         if (signal.to !== playerId) return
 
         const fromId = signal.from
+        console.log(`[Voice] Received signal: ${signal.type} from ${fromId.slice(0, 8)}`)
 
         if (signal.type === 'voice-ready') {
-          if (!peersRef.current.has(fromId) && activeStreamRef.current && playerId > fromId) {
+          const hasPeer = peersRef.current.has(fromId)
+          const hasStream = !!activeStreamRef.current
+          const shouldInitiate = playerId! > fromId
+          console.log(`[Voice] voice-ready: hasPeer=${hasPeer}, hasStream=${hasStream}, shouldInitiate=${shouldInitiate}`)
+          if (!hasPeer && hasStream && shouldInitiate) {
             initiateConnection(fromId)
           }
           return
@@ -151,10 +156,14 @@ export function useVoiceChat() {
     if (!isListening || !playerId || !streamReady || !isSupabaseConfigured) return
 
     const otherPlayerIds = Object.keys(players).filter((id) => id !== playerId)
+    console.log(`[Voice] Connection effect: ${otherPlayerIds.length} other player(s), notified=${notifiedPeersRef.current.size}, peers=${peersRef.current.size}`)
 
     for (const otherId of otherPlayerIds) {
-      if (!peersRef.current.has(otherId) && !notifiedPeersRef.current.has(otherId)) {
+      const hasPeer = peersRef.current.has(otherId)
+      const notified = notifiedPeersRef.current.has(otherId)
+      if (!hasPeer && !notified) {
         notifiedPeersRef.current.add(otherId)
+        console.log(`[Voice] Sending voice-ready to ${otherId.slice(0, 8)}, shouldInitiate=${playerId > otherId}`)
         broadcastSignal({ type: 'voice-ready', from: playerId, to: otherId, data: null })
         if (playerId > otherId) {
           initiateConnection(otherId)
