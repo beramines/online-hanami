@@ -151,6 +151,10 @@ export function useVoiceChat() {
 
     peer.onConnectionStateChange = (state) => {
       console.log(`[Voice] Peer ${remoteId.slice(0, 8)}: ${state}`)
+      if (state === 'disconnected' || state === 'failed') {
+        cleanupPeer(remoteId)
+        notifiedPeersRef.current.delete(remoteId)
+      }
     }
 
     peersRef.current.set(remoteId, peer)
