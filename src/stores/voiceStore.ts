@@ -2,13 +2,13 @@ import { create } from 'zustand'
 import type { VoicePeer } from '../types'
 
 interface VoiceState {
-  isVoiceEnabled: boolean
-  isMuted: boolean
+  isListening: boolean
+  isMicEnabled: boolean
   localStream: MediaStream | null
   peers: Record<string, VoicePeer>
 
-  setVoiceEnabled: (enabled: boolean) => void
-  setMuted: (muted: boolean) => void
+  setListening: (enabled: boolean) => void
+  setMicEnabled: (enabled: boolean) => void
   setLocalStream: (stream: MediaStream | null) => void
   addPeer: (playerId: string, peer: VoicePeer) => void
   removePeer: (playerId: string) => void
@@ -16,13 +16,13 @@ interface VoiceState {
 }
 
 export const useVoiceStore = create<VoiceState>((set) => ({
-  isVoiceEnabled: false,
-  isMuted: false,
+  isListening: false,
+  isMicEnabled: false,
   localStream: null,
   peers: {},
 
-  setVoiceEnabled: (enabled) => set({ isVoiceEnabled: enabled }),
-  setMuted: (muted) => set({ isMuted: muted }),
+  setListening: (enabled) => set({ isListening: enabled }),
+  setMicEnabled: (enabled) => set({ isMicEnabled: enabled }),
   setLocalStream: (stream) => set({ localStream: stream }),
   addPeer: (playerId, peer) =>
     set((state) => ({

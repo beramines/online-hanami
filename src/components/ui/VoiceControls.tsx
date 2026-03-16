@@ -2,35 +2,35 @@ import { useVoiceChat } from '../../hooks/useVoiceChat'
 import { useVoiceStore } from '../../stores/voiceStore'
 
 export function VoiceControls() {
-  const isVoiceEnabled = useVoiceStore((s) => s.isVoiceEnabled)
-  const isMuted = useVoiceStore((s) => s.isMuted)
-  const { toggleVoice, toggleMute } = useVoiceChat()
+  const isListening = useVoiceStore((s) => s.isListening)
+  const isMicEnabled = useVoiceStore((s) => s.isMicEnabled)
+  const { toggleListening, toggleMic } = useVoiceChat()
 
   return (
     <div style={styles.container}>
       <button
         style={{
           ...styles.btn,
-          background: isVoiceEnabled ? 'rgba(74,222,128,0.9)' : 'rgba(255,255,255,0.9)',
-          color: isVoiceEnabled ? '#fff' : '#3a2a2a',
+          background: isListening ? 'rgba(74,222,128,0.9)' : 'rgba(255,255,255,0.9)',
+          color: isListening ? '#fff' : '#3a2a2a',
         }}
-        onClick={toggleVoice}
-        title={isVoiceEnabled ? 'ボイスチャットOFF' : 'ボイスチャットON'}
+        onClick={toggleListening}
+        title={isListening ? '聞くOFF' : '聞くON'}
       >
-        {isVoiceEnabled ? '🎙️ ON' : '🎙️ OFF'}
+        {isListening ? '🔊 聞く' : '🔇 聞く'}
       </button>
 
-      {isVoiceEnabled && (
+      {isListening && (
         <button
           style={{
             ...styles.btn,
-            background: isMuted ? 'rgba(239,68,68,0.9)' : 'rgba(255,255,255,0.9)',
-            color: isMuted ? '#fff' : '#3a2a2a',
+            background: isMicEnabled ? 'rgba(74,222,128,0.9)' : 'rgba(255,255,255,0.9)',
+            color: isMicEnabled ? '#fff' : '#3a2a2a',
           }}
-          onClick={toggleMute}
-          title={isMuted ? 'ミュート解除' : 'ミュート'}
+          onClick={toggleMic}
+          title={isMicEnabled ? 'マイクOFF' : 'マイクON'}
         >
-          {isMuted ? '🔇' : '🔊'}
+          {isMicEnabled ? '🎙️ ON' : '🎙️ OFF'}
         </button>
       )}
     </div>

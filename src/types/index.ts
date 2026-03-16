@@ -34,5 +34,4 @@ export interface RoomInfo {
 export interface VoicePeer {
   playerId: string
   stream: MediaStream | null
-  isMuted: boolean
 }

@@ -100,6 +100,13 @@ export class VoicePeerConnection {
     this.pendingCandidates = []
   }
 
+  async replaceAudioTrack(track: MediaStreamTrack) {
+    const sender = this.pc.getSenders().find((s) => s.track?.kind === 'audio')
+    if (sender) {
+      await sender.replaceTrack(track)
+    }
+  }
+
   close() {
     this.pc.close()
   }
