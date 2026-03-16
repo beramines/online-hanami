@@ -46,7 +46,11 @@ export function useVoiceChat() {
   const activeStreamRef = useRef<MediaStream | null>(null)
   const peersRef = useRef<Map<string, VoicePeerConnection>>(new Map())
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map())
+  const analysersRef = useRef<Map<string, { analyser: AnalyserNode; ctx: AudioContext }>>(new Map())
+  const speakingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const notifiedPeersRef = useRef<Set<string>>(new Set())
+
+  const updatePlayer = useGameStore((s) => s.updatePlayer)
 
   const cleanupPeer = (peerId: string) => {
     const peer = peersRef.current.get(peerId)
@@ -61,6 +65,12 @@ export function useVoiceChat() {
       audio.srcObject = null
       audioElementsRef.current.delete(peerId)
     }
+    const analyserEntry = analysersRef.current.get(peerId)
+    if (analyserEntry) {
+      analyserEntry.ctx.close()
+      analysersRef.current.delete(peerId)
+    }
+    updatePlayer(peerId, { isSpeaking: false })
   }
 
   // Handle incoming voice signals
@@ -110,6 +120,28 @@ export function useVoiceChat() {
     return () => window.removeEventListener('voice-signal', handleSignal)
   }, [isListening, playerId])
 
+  // Speaking detection: monitor audio analysers periodically
+  useEffect(() => {
+    if (!isListening) return
+
+    speakingIntervalRef.current = setInterval(() => {
+      for (const [peerId, { analyser }] of analysersRef.current) {
+        const data = new Uint8Array(analyser.frequencyBinCount)
+        analyser.getByteFrequencyData(data)
+        const avg = data.reduce((sum, v) => sum + v, 0) / data.length
+        const speaking = avg > 15
+        updatePlayer(peerId, { isSpeaking: speaking })
+      }
+    }, 150)
+
+    return () => {
+      if (speakingIntervalRef.current) {
+        clearInterval(speakingIntervalRef.current)
+        speakingIntervalRef.current = null
+      }
+    }
+  }, [isListening, updatePlayer])
+
   // When listening is enabled, broadcast voice-ready and connect
   useEffect(() => {
     if (!isListening || !playerId || !activeStreamRef.current || !isSupabaseConfigured) return
@@ -152,11 +184,23 @@ export function useVoiceChat() {
         audio.srcObject = stream
         audioElementsRef.current.set(remoteId, audio)
       }
+      audio.volume = 1
       audio.play().catch((err) => {
         if (err.name !== 'AbortError') {
           console.warn('[Voice] Audio play failed:', err)
         }
       })
+
+      // Set up audio analyser for speaking detection
+      const oldAnalyser = analysersRef.current.get(remoteId)
+      if (oldAnalyser) oldAnalyser.ctx.close()
+
+      const ctx = new AudioContext()
+      const source = ctx.createMediaStreamSource(stream)
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 256
+      source.connect(analyser)
+      analysersRef.current.set(remoteId, { analyser, ctx })
     }
 
     peer.onIceCandidate = (candidate) => {
@@ -217,6 +261,12 @@ export function useVoiceChat() {
       audio.srcObject = null
     }
     audioElementsRef.current.clear()
+
+    for (const { ctx } of analysersRef.current.values()) {
+      ctx.close()
+    }
+    analysersRef.current.clear()
+
     notifiedPeersRef.current.clear()
 
     // Stop mic if active
@@ -302,6 +352,12 @@ export function useVoiceChat() {
       for (const audio of audioElementsRef.current.values()) {
         audio.pause()
         audio.srcObject = null
+      }
+      for (const { ctx } of analysersRef.current.values()) {
+        ctx.close()
+      }
+      if (speakingIntervalRef.current) {
+        clearInterval(speakingIntervalRef.current)
       }
       if (micStreamRef.current) {
         micStreamRef.current.getTracks().forEach((track) => track.stop())
