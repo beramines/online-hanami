@@ -5,25 +5,24 @@ const STUN_ONLY_CONFIG: RTCConfiguration = {
   ],
 }
 
-let cachedConfig: RTCConfiguration | null = null
+let fetchPromise: Promise<RTCConfiguration> | null = null
 
-export async function getIceServers(): Promise<RTCConfiguration> {
-  if (cachedConfig) return cachedConfig
-
-  try {
-    const res = await fetch('/api/turn-credentials')
-    if (res.ok) {
-      const data = await res.json()
-      cachedConfig = { iceServers: data.iceServers }
-      return cachedConfig
-    }
-  } catch (err) {
-    console.warn('[WebRTC] Failed to fetch TURN credentials:', err)
+export function getIceServers(): Promise<RTCConfiguration> {
+  if (!fetchPromise) {
+    fetchPromise = fetch('/api/turn-credentials')
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.json()
+      })
+      .then((data) => ({ iceServers: data.iceServers }) as RTCConfiguration)
+      .catch((err) => {
+        console.warn('[WebRTC] Failed to fetch TURN credentials:', err)
+        console.warn('[WebRTC] Using STUN only (no TURN)')
+        fetchPromise = null
+        return STUN_ONLY_CONFIG
+      })
   }
-
-  console.warn('[WebRTC] Using STUN only (no TURN)')
-  cachedConfig = STUN_ONLY_CONFIG
-  return cachedConfig
+  return fetchPromise
 }
 
 export class VoicePeerConnection {
@@ -77,6 +76,10 @@ export class VoicePeerConnection {
   }
 
   async setAnswer(answer: RTCSessionDescriptionInit) {
+    if (this.pc.signalingState !== 'have-local-offer') {
+      console.log(`[Voice] Ignoring answer in state: ${this.pc.signalingState}`)
+      return
+    }
     await this.pc.setRemoteDescription(new RTCSessionDescription(answer))
     this.remoteDescriptionSet = true
     await this.flushPendingCandidates()

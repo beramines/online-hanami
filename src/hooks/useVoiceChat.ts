@@ -143,19 +143,20 @@ export function useVoiceChat() {
     peer.onStream = (stream) => {
       addPeer(remoteId, { playerId: remoteId, stream })
 
-      const oldAudio = audioElementsRef.current.get(remoteId)
-      if (oldAudio) {
-        oldAudio.pause()
-        oldAudio.srcObject = null
+      // Reuse existing audio element to avoid play/pause race conditions
+      let audio = audioElementsRef.current.get(remoteId)
+      if (audio) {
+        audio.srcObject = stream
+      } else {
+        audio = new Audio()
+        audio.srcObject = stream
+        audioElementsRef.current.set(remoteId, audio)
       }
-
-      const audio = new Audio()
-      audio.srcObject = stream
-      audio.autoplay = true
       audio.play().catch((err) => {
-        console.warn('[Voice] Audio play failed:', err)
+        if (err.name !== 'AbortError') {
+          console.warn('[Voice] Audio play failed:', err)
+        }
       })
-      audioElementsRef.current.set(remoteId, audio)
     }
 
     peer.onIceCandidate = (candidate) => {
