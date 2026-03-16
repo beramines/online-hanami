@@ -1,4 +1,4 @@
-import { useCallback, useRef, useEffect } from 'react'
+import { useCallback, useRef, useEffect, useState } from 'react'
 import { useVoiceStore } from '../stores/voiceStore'
 import { useGameStore } from '../stores/gameStore'
 import { VoicePeerConnection, getIceServers } from '../lib/webrtc'
@@ -37,6 +37,7 @@ export function useVoiceChat() {
   const removePeer = useVoiceStore((s) => s.removePeer)
   const playerId = useGameStore((s) => s.playerId)
   const players = useGameStore((s) => s.players)
+  const updatePlayer = useGameStore((s) => s.updatePlayer)
 
   // Silent stream used when mic is off (allows receiving without mic permission)
   const silentStreamRef = useRef<{ stream: MediaStream; ctx: AudioContext } | null>(null)
@@ -50,7 +51,10 @@ export function useVoiceChat() {
   const speakingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const notifiedPeersRef = useRef<Set<string>>(new Set())
 
-  const updatePlayer = useGameStore((s) => s.updatePlayer)
+  // Use state (not ref) so changes trigger effects
+  const [streamReady, setStreamReady] = useState(false)
+  // Counter to force re-run of connection effect after peer cleanup
+  const [reconnectTrigger, setReconnectTrigger] = useState(0)
 
   const cleanupPeer = (peerId: string) => {
     const peer = peersRef.current.get(peerId)
@@ -142,9 +146,9 @@ export function useVoiceChat() {
     }
   }, [isListening, updatePlayer])
 
-  // When listening is enabled, broadcast voice-ready and connect
+  // When listening is enabled and stream is ready, broadcast voice-ready and connect
   useEffect(() => {
-    if (!isListening || !playerId || !activeStreamRef.current || !isSupabaseConfigured) return
+    if (!isListening || !playerId || !streamReady || !isSupabaseConfigured) return
 
     const otherPlayerIds = Object.keys(players).filter((id) => id !== playerId)
 
@@ -166,7 +170,7 @@ export function useVoiceChat() {
         notifiedPeersRef.current.delete(peerId)
       }
     }
-  }, [isListening, playerId, players])
+  }, [isListening, playerId, players, streamReady, reconnectTrigger])
 
   const createPeer = async (remoteId: string): Promise<VoicePeerConnection> => {
     const config = await getIceServers()
@@ -217,6 +221,8 @@ export function useVoiceChat() {
       if (state === 'disconnected' || state === 'failed') {
         cleanupPeer(remoteId)
         notifiedPeersRef.current.delete(remoteId)
+        // Trigger reconnection attempt
+        setReconnectTrigger((n) => n + 1)
       }
     }
 
@@ -245,6 +251,7 @@ export function useVoiceChat() {
     const silent = createSilentStream()
     silentStreamRef.current = silent
     activeStreamRef.current = silent.stream
+    setStreamReady(true)
     setListening(true)
   }, [setListening])
 
@@ -282,6 +289,7 @@ export function useVoiceChat() {
     }
 
     activeStreamRef.current = null
+    setStreamReady(false)
     setLocalStream(null)
     setListening(false)
     setMicEnabled(false)
