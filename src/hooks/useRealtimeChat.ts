@@ -43,7 +43,9 @@ export function useRealtimeChat() {
 
     // Voice signaling
     channel.on('broadcast', { event: 'voice-signal' }, (payload) => {
-      window.dispatchEvent(new CustomEvent('voice-signal', { detail: payload.payload }))
+      const signal = payload.payload
+      console.log(`[Voice:Channel] Received broadcast: type=${signal.type}, from=${signal.from?.slice(0, 8)}, to=${signal.to?.slice(0, 8)}, myId=${playerId?.slice(0, 8)}`)
+      window.dispatchEvent(new CustomEvent('voice-signal', { detail: signal }))
     })
 
     // Presence sync — get all currently present players

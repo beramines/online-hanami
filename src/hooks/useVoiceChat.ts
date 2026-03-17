@@ -1,4 +1,4 @@
-import { useCallback, useRef, useEffect, useState } from 'react'
+import { useCallback, useRef, useEffect, useState, useMemo } from 'react'
 import { useVoiceStore } from '../stores/voiceStore'
 import { useGameStore } from '../stores/gameStore'
 import { VoicePeerConnection, getIceServers } from '../lib/webrtc'
@@ -38,6 +38,9 @@ export function useVoiceChat() {
   const playerId = useGameStore((s) => s.playerId)
   const players = useGameStore((s) => s.players)
   const updatePlayer = useGameStore((s) => s.updatePlayer)
+
+  // Stable string of player IDs to avoid effect re-runs on every position update
+  const playerIds = useMemo(() => Object.keys(players).sort().join(','), [players])
 
   // Silent stream used when mic is off (allows receiving without mic permission)
   const silentStreamRef = useRef<{ stream: MediaStream; ctx: AudioContext } | null>(null)
@@ -155,7 +158,7 @@ export function useVoiceChat() {
   useEffect(() => {
     if (!isListening || !playerId || !streamReady || !isSupabaseConfigured) return
 
-    const otherPlayerIds = Object.keys(players).filter((id) => id !== playerId)
+    const otherPlayerIds = playerIds.split(',').filter((id) => id && id !== playerId)
     console.log(`[Voice] Connection effect: ${otherPlayerIds.length} other player(s), notified=${notifiedPeersRef.current.size}, peers=${peersRef.current.size}`)
 
     for (const otherId of otherPlayerIds) {
@@ -179,7 +182,7 @@ export function useVoiceChat() {
         notifiedPeersRef.current.delete(peerId)
       }
     }
-  }, [isListening, playerId, players, streamReady, reconnectTrigger])
+  }, [isListening, playerId, playerIds, streamReady, reconnectTrigger])
 
   const createPeer = async (remoteId: string): Promise<VoicePeerConnection> => {
     const config = await getIceServers()
