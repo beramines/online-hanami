@@ -2,10 +2,11 @@ name: Preview Deploy
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, closed]
 
 jobs:
   preview:
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -35,6 +36,42 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy dist/ --project-name=online-hanami --branch=${{ github.head_ref }}
+
+      - name: Delete old preview deployments
+        uses: actions/github-script@v7
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CURRENT_DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment-url }}
+          BRANCH_NAME: ${{ github.head_ref }}
+        with:
+          script: |
+            const branch = process.env.BRANCH_NAME;
+            const res = await fetch(
+              `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/pages/projects/online-hanami/deployments?per_page=50`,
+              { headers: { 'Authorization': `Bearer ${process.env.CF_API_TOKEN}` } }
+            );
+            if (!res.ok) {
+              core.warning(`Failed to list deployments: ${res.status}`);
+              return;
+            }
+            const { result } = await res.json();
+            const currentUrl = process.env.CURRENT_DEPLOYMENT_URL;
+
+            for (const d of result) {
+              if (d.deployment_trigger?.metadata?.branch !== branch) continue;
+              if (d.url === currentUrl) continue;
+
+              console.log(`Deleting old deployment: ${d.id} (${d.url})`);
+              const delRes = await fetch(
+                `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/pages/projects/online-hanami/deployments/${d.id}?force=true`,
+                { method: 'DELETE', headers: { 'Authorization': `Bearer ${process.env.CF_API_TOKEN}` } }
+              );
+              const delJson = await delRes.json();
+              if (!delJson.success) {
+                console.log(`Failed to delete ${d.id}:`, JSON.stringify(delJson.errors));
+              }
+            }
 
       - name: Comment preview URL on PR
         uses: actions/github-script@v7
@@ -74,3 +111,47 @@ jobs:
                 body,
               });
             }
+
+  cleanup:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Delete all preview deployments for branch
+        uses: actions/github-script@v7
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BRANCH_NAME: ${{ github.head_ref }}
+        with:
+          script: |
+            const branch = process.env.BRANCH_NAME;
+            const res = await fetch(
+              `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/pages/projects/online-hanami/deployments?per_page=50`,
+              { headers: { 'Authorization': `Bearer ${process.env.CF_API_TOKEN}` } }
+            );
+            if (!res.ok) {
+              core.warning(`Failed to list deployments: ${res.status}`);
+              return;
+            }
+            const { result } = await res.json();
+
+            let deleted = 0;
+            for (const d of result) {
+              if (d.deployment_trigger?.metadata?.branch !== branch) continue;
+
+              console.log(`Deleting deployment: ${d.id} (${d.url})`);
+              const delRes = await fetch(
+                `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/pages/projects/online-hanami/deployments/${d.id}?force=true`,
+                { method: 'DELETE', headers: { 'Authorization': `Bearer ${process.env.CF_API_TOKEN}` } }
+              );
+              const delJson = await delRes.json();
+              if (delJson.success) {
+                deleted++;
+              } else {
+                console.log(`Failed to delete ${d.id}:`, JSON.stringify(delJson.errors));
+              }
+            }
+            console.log(`Deleted ${deleted} preview deployment(s) for branch: ${branch}`);
