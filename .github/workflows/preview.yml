@@ -43,13 +43,18 @@ jobs:
           CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CURRENT_DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment-url }}
+          BRANCH_NAME: ${{ github.head_ref }}
         with:
           script: |
-            const branch = '${{ github.head_ref }}';
+            const branch = process.env.BRANCH_NAME;
             const res = await fetch(
-              `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/pages/projects/online-hanami/deployments`,
+              `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/pages/projects/online-hanami/deployments?per_page=50`,
               { headers: { 'Authorization': `Bearer ${process.env.CF_API_TOKEN}` } }
             );
+            if (!res.ok) {
+              core.warning(`Failed to list deployments: ${res.status}`);
+              return;
+            }
             const { result } = await res.json();
             const currentUrl = process.env.CURRENT_DEPLOYMENT_URL;
 
@@ -110,6 +115,8 @@ jobs:
   cleanup:
     if: github.event.action == 'closed'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Delete all preview deployments for branch
@@ -117,13 +124,18 @@ jobs:
         env:
           CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BRANCH_NAME: ${{ github.head_ref }}
         with:
           script: |
-            const branch = '${{ github.head_ref }}';
+            const branch = process.env.BRANCH_NAME;
             const res = await fetch(
-              `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/pages/projects/online-hanami/deployments`,
+              `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/pages/projects/online-hanami/deployments?per_page=50`,
               { headers: { 'Authorization': `Bearer ${process.env.CF_API_TOKEN}` } }
             );
+            if (!res.ok) {
+              core.warning(`Failed to list deployments: ${res.status}`);
+              return;
+            }
             const { result } = await res.json();
 
             let deleted = 0;
